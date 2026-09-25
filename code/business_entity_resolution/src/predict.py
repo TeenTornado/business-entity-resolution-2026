@@ -11,8 +11,11 @@ import pandas as pd
 import blocking
 import features
 import scoring
-from io_utils import read_p23
+from io_utils import read_p1, read_p23
 from train import add_candidate_features, load, prepare_candidates, read_spill
+
+
+CAND_COLS = ["entity_id", "country", "n_core", "n_legal", "a_toks", "a_nums", "a_comps"]
 
 
 def write_lists(path, header, P1_ids, i1, ids):
@@ -37,6 +40,7 @@ def main():
     ap.add_argument("--cap", type=int, default=3000)
     ap.add_argument("--k", type=int, default=30)
     ap.add_argument("--block", type=int, default=150000, help="S1 rows scored per block")
+    ap.add_argument("--country", default=None, help="internal: run the candidate stage for one country")
     a = ap.parse_args()
     t0 = time.time()
     log = lambda m: print(f"[{time.time() - t0:7.0f}s] {m}", flush=True)  # noqa: E731
@@ -49,28 +53,35 @@ def main():
         blocking.run(P1, P23, cap=a.cap, k=a.k, log=log).to_parquet(cand_path)
         del P1, P23
     # Retrieval never crosses country labels, so every competition feature (all S1s that
-    # retrieved a record) lives inside one country: process country by country to bound memory.
-    raw = pd.read_parquet(cand_path)
-    ids23 = read_p23(a.work, a.split, ["entity_id"]).entity_id
-    P1, P23 = load(a.work, a.split)
-    log(f"retrieval candidates: {len(raw)} ({len(raw) / len(P1):.1f} per S1)")
-    pr = lgb.Booster(model_file=f"{a.model_dir}/lgb_pruner.txt")
+    # retrieved a record) lives inside one country. The candidate stage therefore runs one
+    # country per process (bounded memory); results are spilled to disk and merged here.
     spill = f"{a.work}/{a.split}_candfeat_spill"
-    parts = []
-    ctry = P1.country.values[raw.i1.values]
-    for country in pd.unique(ctry):
-        m = ctry == country
-        cand = prepare_candidates(raw[m].reset_index(drop=True), ids23)
-        sp = f"{spill}_{len(parts)}"
+    countries = pd.unique(read_p1(a.work, a.split, ["country"]).country.values)
+    if a.country:
+        country = a.country
+        raw = pd.read_parquet(cand_path)
+        P1 = read_p1(a.work, a.split, CAND_COLS)
+        raw = raw[P1.country.values[raw.i1.values] == country].reset_index(drop=True)
+        ids23 = read_p23(a.work, a.split, ["entity_id"]).entity_id
+        cand = prepare_candidates(raw, ids23)
+        del raw, ids23
+        P23 = read_p23(a.work, a.split, CAND_COLS)
+        pr = lgb.Booster(model_file=f"{a.model_dir}/lgb_pruner.txt")
+        sp = f"{spill}_{country}"
         os.makedirs(sp, exist_ok=True)
         add_candidate_features(cand, P1, P23, cfg.get("offsets", []), pruner=pr, prune_thr=cfg["prune_thr"],
                                pruner_cols=cfg["pruner_cols"], log=log, spill=sp)
-        del cand
-        parts.append(sp)
-        log(f"  {country}: done")
-    del raw, ctry, ids23
-    scoring._MEMO.clear()
-    cand = pd.concat([read_spill(sp) for sp in parts], ignore_index=True)
+        log(f"candidate stage done for {country}")
+        return
+    import subprocess
+    import sys
+    for country in countries:
+        if not os.path.exists(f"{spill}_{country}/DONE"):
+            subprocess.run([sys.executable, __file__, "--work", a.work, "--model-dir", a.model_dir, "--out", a.out,
+                            "--split", a.split, "--country", str(country)], check=True)
+            open(f"{spill}_{country}/DONE", "w").close()
+    P1, P23 = load(a.work, a.split)
+    cand = pd.concat([read_spill(f"{spill}_{c}") for c in countries], ignore_index=True)
     cand = cand.sort_values(["i1", "blk_score"], ascending=[True, False], kind="stable").reset_index(drop=True)
     log(f"pruned candidate set: {len(cand)} pairs ({len(cand) / len(P1):.2f} per S1)")
     write_lists(f"{a.out}/candidate_pairs.tsv", "candidate_entity_ids", P1.entity_id.values,

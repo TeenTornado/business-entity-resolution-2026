@@ -105,10 +105,7 @@ def _downcast(df):
 
 def read_spill(spill):
     import glob
-    import shutil
-    out = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(f"{spill}/part*.parquet"))], ignore_index=True)
-    shutil.rmtree(spill)
-    return out
+    return pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(f"{spill}/part*.parquet"))], ignore_index=True)
 
 
 PRUNER_FEATURES = scoring.PRUNER_COLS + scoring.VOCAB_COLS + scoring.SIB_COLS + scoring.NAME_GRAPH_COLS
@@ -168,6 +165,8 @@ def main():
     del cand
     scoring._MEMO.clear()
     cand = read_spill(spill)
+    import shutil
+    shutil.rmtree(spill)
     log("candidate-level features done")
 
     # ---- stage A: candidate pruner (cheap features only) -> the candidate set
