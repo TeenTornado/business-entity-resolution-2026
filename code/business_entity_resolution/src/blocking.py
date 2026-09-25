@@ -198,3 +198,45 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def split_cosines(P1, P23, cand, chunk=2000000):
+    """Name-only and address-only IDF cosine for each candidate pair (cheap sparse
+    dot products; used by the candidate pruner). Returns two float32 arrays."""
+    name_cos = np.zeros(len(cand), np.float32)
+    addr_cos = np.zeros(len(cand), np.float32)
+    c1 = P1.country.values[cand.i1.values]
+    for country in np.unique(c1):
+        idx1 = np.flatnonzero(P1.country.values == country)
+        idx2 = np.flatnonzero(P23.country.values == country)
+        rows = np.flatnonzero(c1 == country)
+        pos1 = np.full(len(P1), -1, np.int64)
+        pos1[idx1] = np.arange(len(idx1))
+        pos2 = np.full(len(P23), -1, np.int64)
+        pos2[idx2] = np.arange(len(idx2))
+        for kind, out in (("name", name_cos), ("addr", addr_cos)):
+            def docs(P, idx):
+                if kind == "name":
+                    res = []
+                    for n in P.n_core.values[idx]:
+                        nc = n.split()
+                        res.append(" ".join(["n:" + t for t in nc] + ["n:" + a + b for a, b in zip(nc, nc[1:])]))
+                    return res
+                res = []
+                for at, comps in zip(P.a_toks.values[idx], P.a_comps.values[idx]):
+                    t = ["a:" + x for x in at.split()]
+                    for comp in comps.split("|"):
+                        ct = comp.split()
+                        t += ["b:" + a + "_" + b for a, b in zip(ct, ct[1:])]
+                    res.append(" ".join(t))
+                return res
+            X1, X2 = vectorize(docs(P1, idx1)), vectorize(docs(P23, idx2))
+            W1, W2, _ = weight(X1, X2, cap=np.inf)
+            del X1, X2
+            for lo in range(0, len(rows), chunk):
+                r = rows[lo:lo + chunk]
+                a = W1[pos1[cand.i1.values[r]]]
+                b = W2[pos2[cand.i2.values[r]]]
+                out[r] = np.asarray(a.multiply(b).sum(axis=1)).ravel()
+            del W1, W2
+    return name_cos, addr_cos

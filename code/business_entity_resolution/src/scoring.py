@@ -114,3 +114,63 @@ def freq_features(cand, P1, P23):
 
 FREQ_COLS = ["fq_name_a_s1", "fq_name_a_s23", "fq_name_b_s1", "fq_name_b_s23", "fq_addr_a_s1",
              "fq_addr_b_s1", "fq_addr_b_s23", "fq_name_b_in_cands"]
+
+
+def pruner_features(cand, P1, P23, name_cos, addr_cos):
+    """Cheap, fully vectorised pair signals for the candidate pruner."""
+    def eq(col):
+        c, _ = pd.factorize(np.concatenate([P1[col].values, P23[col].values]))
+        a, b = c[: len(P1)], c[len(P1):]
+        return (a[cand.i1.values] == b[cand.i2.values]).astype(np.int8)
+
+    cand["pr_name_cos"] = name_cos
+    cand["pr_addr_cos"] = addr_cos
+    cand["pr_name_eq"] = eq("n_core")
+    cand["pr_addr_eq"] = eq("a_toks")
+    first = lambda s: s.str.split(" ", n=1).str[0]  # noqa: E731
+    f1, f2 = first(P1.a_nums), first(P23.a_nums)
+    c, _ = pd.factorize(np.concatenate([f1.values, f2.values]))
+    a, b = c[: len(P1)], c[len(P1):]
+    has = (f1.values[cand.i1.values] != "") & (f2.values[cand.i2.values] != "")
+    cand["pr_num_eq"] = np.where(has, (a[cand.i1.values] == b[cand.i2.values]).astype(np.int8), -1).astype(np.int8)
+    cand["pr_b_addr_empty"] = (P23.a_toks.values[cand.i2.values] == "").astype(np.int8)
+    return cand
+
+
+PRUNER_COLS = CONTEXT_COLS + FREQ_COLS + ["pr_name_cos", "pr_addr_cos", "pr_name_eq", "pr_addr_eq", "pr_num_eq",
+                                          "pr_b_addr_empty"]
+
+
+def vocab_features(cand, P1, P23):
+    """Name-token vocabulary skew between the reference (S1) pool and the S2/S3 pool,
+    per country. Tokens that are common in S2/S3 but rare in S1 (e.g. shop-type words
+    used mostly by businesses absent from S1) signal records that likely have no S1 match."""
+    import collections
+    import math
+    out1 = np.zeros((len(P1), 2), np.float32)
+    out2 = np.zeros((len(P23), 2), np.float32)
+    for country in pd.unique(P1.country.values):
+        m1 = P1.country.values == country
+        m2 = P23.country.values == country
+        c1, c2 = collections.Counter(), collections.Counter()
+        for v in P1.n_core.values[m1]:
+            c1.update(set(v.split()))
+        for v in P23.n_core.values[m2]:
+            c2.update(set(v.split()))
+        base = np.log((m2.sum() + 1) / (m1.sum() + 1))
+        for mask, out in ((m1, out1), (m2, out2)):
+            idx = np.flatnonzero(mask)
+            for j, v in zip(idx, P1.n_core.values[idx] if out is out1 else P23.n_core.values[idx]):
+                toks = v.split()
+                if not toks:
+                    continue
+                r = [math.log((c2.get(t, 0) + 1) / (c1.get(t, 0) + 1)) - base for t in toks]
+                out[j, 0] = max(r)
+                out[j, 1] = sum(r) / len(r)
+    cand["vc_skew_max_b"] = out2[cand.i2.values, 0]
+    cand["vc_skew_mean_b"] = out2[cand.i2.values, 1]
+    cand["vc_skew_max_a"] = out1[cand.i1.values, 0]
+    return cand
+
+
+VOCAB_COLS = ["vc_skew_max_b", "vc_skew_mean_b", "vc_skew_max_a"]

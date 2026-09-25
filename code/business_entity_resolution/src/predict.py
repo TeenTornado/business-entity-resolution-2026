@@ -49,13 +49,21 @@ def main():
     else:
         cand = blocking.run(P1, P23, cap=a.cap, k=a.k, log=log)
         cand.to_parquet(cand_path)
-    log(f"candidates: {len(cand)}")
+    log(f"retrieval candidates (blocking top-{a.k}): {len(cand)}")
+    cand = prepare_candidates(cand, P23.entity_id)
+    cand = scoring.freq_features(cand, P1, P23)
+    cand = scoring.vocab_features(cand, P1, P23)
+    if "prune_thr" in cfg:
+        # candidate pruner: cheap blocking-stage features only; its survivors ARE the candidate set
+        nc, ac = blocking.split_cosines(P1, P23, cand)
+        cand = scoring.pruner_features(cand, P1, P23, nc, ac)
+        del nc, ac
+        pr = lgb.Booster(model_file=f"{a.model_dir}/lgb_pruner.txt")
+        q = pr.predict(cand[cfg["pruner_cols"]], num_threads=4)
+        cand = cand[q >= cfg["prune_thr"]].reset_index(drop=True)
+        log(f"pruned candidate set: {len(cand)} pairs ({len(cand) / len(P1):.2f} per S1)")
     write_lists(f"{a.out}/candidate_pairs.tsv", "candidate_entity_ids", P1.entity_id.values,
                 cand.i1.values, P23.entity_id.values[cand.i2.values])
-
-    cand = prepare_candidates(cand, P23.entity_id)
-    if any(c in cfg["feat_cols"] for c in scoring.FREQ_COLS):
-        cand = scoring.freq_features(cand, P1, P23)
     tables = features.build_df_tables([P1, P23])
     log("df tables built")
     m1 = lgb.Booster(model_file=f"{a.model_dir}/lgb_stage1.txt")

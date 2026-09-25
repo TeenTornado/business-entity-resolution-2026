@@ -9,6 +9,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+import blocking
 import features
 import scoring
 
@@ -55,6 +56,10 @@ PARAMS = dict(objective="binary", learning_rate=0.1, num_leaves=127, min_data_in
               verbose=-1, num_threads=4)
 
 
+PRUNER_PARAMS = dict(objective="binary", learning_rate=0.1, num_leaves=63, min_data_in_leaf=200,
+                     feature_fraction=0.9, bagging_fraction=0.8, bagging_freq=1, verbose=-1, num_threads=4)
+
+
 def tune(cand_v, p, s1_val, truth_counts):
     best = (-1, None)
     grid = []
@@ -76,7 +81,7 @@ def main():
     ap.add_argument("--n-val", type=int, default=150000)
     ap.add_argument("--rounds", type=int, default=3000)
     ap.add_argument("--reuse-features", action="store_true")
-    ap.add_argument("--stage2", action="store_true", help="adopt stage-2 model if it wins on validation")
+    ap.add_argument("--prune-thr", type=float, default=0.01, help="pruner probability cut for the candidate set")
     a = ap.parse_args()
     t0 = time.time()
     log = lambda m: print(f"[{time.time() - t0:7.0f}s] {m}", flush=True)  # noqa: E731
@@ -90,8 +95,7 @@ def main():
     log(f"candidates={len(cand)} positives={cand.label.sum()} total_true={truth_counts.sum()} "
         f"pair_recall={cand.label.sum() / truth_counts.sum():.4f}")
     tr_ids, va_ids = split_ids(len(ids), n_train=a.n_train, n_val=a.n_val)
-    # val half A: early stopping + stage-2 training; val half B: untouched, used for
-    # threshold tuning and the reported validation score
+    # val half A: early stopping + threshold tuning; val half B: untouched, reported score
     rng = np.random.RandomState(1)
     half = rng.rand(len(va_ids)) < 0.5
     va_a, va_b = va_ids[half], va_ids[~half]
@@ -99,6 +103,27 @@ def main():
     del ids, ids23
     P1, P23 = load(a.work, "train")
     cand = scoring.freq_features(cand, P1, P23)
+    cand = scoring.vocab_features(cand, P1, P23)
+    nc, ac = blocking.split_cosines(P1, P23, cand)
+    cand = scoring.pruner_features(cand, P1, P23, nc, ac)
+    del nc, ac
+    log("context / frequency / pruner features done")
+
+    # ---- stage A: candidate pruner (cheap features only) -> the candidate set
+    pcols = scoring.PRUNER_COLS + scoring.VOCAB_COLS
+    is_tr, is_a, is_b = (cand.i1.isin(x).values for x in (tr_ids, va_a, va_b))
+    pr = lgb.train(PRUNER_PARAMS, lgb.Dataset(cand.loc[is_tr, pcols], cand.label[is_tr]), num_boost_round=800,
+                   valid_sets=[lgb.Dataset(cand.loc[is_a, pcols], cand.label[is_a])],
+                   callbacks=[lgb.early_stopping(30), lgb.log_evaluation(200)])
+    q = pr.predict(cand[pcols], num_iteration=pr.best_iteration)
+    kept = q >= a.prune_thr
+    tot_b = truth_counts.reindex(va_b).fillna(0).sum()
+    log(f"pruner: keep q>={a.prune_thr}: candidates/S1 (half B) {kept[is_b].sum() / len(va_b):.2f} "
+        f"(from {is_b.sum() / len(va_b):.2f}), pair recall {cand.label[is_b & kept].sum() / tot_b:.4f} "
+        f"(from {cand.label[is_b].sum() / tot_b:.4f})")
+    cand = cand[kept].reset_index(drop=True)
+
+    # ---- stage B: pairwise matcher on the pruned candidate set
     cache = f"{a.work}/feat_pairs.parquet"
     if a.reuse_features and os.path.exists(cache):
         F = pd.read_parquet(cache)
@@ -113,7 +138,8 @@ def main():
     del P1, P23
     cand = pd.concat([cand, F.set_index(cand.index)], axis=1)
     del F
-    feat_cols = features.FEATURE_NAMES + scoring.CONTEXT_COLS + scoring.FREQ_COLS
+    feat_cols = features.FEATURE_NAMES + scoring.CONTEXT_COLS + scoring.FREQ_COLS + scoring.VOCAB_COLS + \
+        ["pr_name_cos", "pr_addr_cos"]
     tr = cand[cand.i1.isin(tr_ids)]
     vA = cand[cand.i1.isin(va_a)].reset_index(drop=True)
     vB = cand[cand.i1.isin(va_b)].reset_index(drop=True)
@@ -124,39 +150,23 @@ def main():
     m1 = lgb.train(PARAMS, dtr, num_boost_round=a.rounds, valid_sets=[dva],
                    callbacks=[lgb.early_stopping(50), lgb.log_evaluation(200)])
     del dtr, dva, tr
-    log(f"stage1 trained, best_iter={m1.best_iteration}")
+    log(f"matcher trained, best_iter={m1.best_iteration}")
     pA = m1.predict(vA[feat_cols], num_iteration=m1.best_iteration)
     pB = m1.predict(vB[feat_cols], num_iteration=m1.best_iteration)
-    (f1, (thr1, _)), grid1 = tune(vB, pB, va_b, truth_counts)
-    log(f"VALIDATION (half B) stage-1 macro F0.5 = {f1:.5f} at thr={thr1}")
-
-    # stage 2: stage-1 probabilities of competing candidates as extra features
-    cols2 = feat_cols + scoring.PROB_COLS
-    vA = scoring.prob_context(vA, pA)
-    vB = scoring.prob_context(vB, pB)
-    p2 = dict(PARAMS, num_leaves=63)
-    m2 = lgb.train(p2, lgb.Dataset(vA[cols2], vA.label), num_boost_round=600)
-    qB = m2.predict(vB[cols2])
-    (f2, (thr2, _)), grid2 = tune(vB, qB, va_b, truth_counts)
-    log(f"VALIDATION (half B) stage-2 macro F0.5 = {f2:.5f} at thr={thr2}")
-    base_keep = scoring.decide(vB, pB, 0.5, one_owner=False)
-    log(f"(stage-1, plain p>=0.5, no one-owner rule: {scoring.macro_f05(va_b, vB, base_keep, truth_counts)[0]:.5f})")
+    (fA, (thr, _)), grid = tune(vA, pA, va_a, truth_counts)
+    fB, detail = scoring.macro_f05(va_b, vB, scoring.decide(vB, pB, thr), truth_counts)
+    (fB_oracle, (thr_o, _)), _ = tune(vB, pB, va_b, truth_counts)
+    log(f"VALIDATION (half B, threshold {thr:.3f} tuned on half A) macro F0.5 = {fB:.5f} "
+        f"(oracle threshold {thr_o:.3f}: {fB_oracle:.5f})")
 
     os.makedirs(a.model_dir, exist_ok=True)
+    pr.save_model(f"{a.model_dir}/lgb_pruner.txt", num_iteration=pr.best_iteration)
     m1.save_model(f"{a.model_dir}/lgb_stage1.txt", num_iteration=m1.best_iteration)
-    # stage 2 is only adopted when explicitly requested: its competitor features are
-    # computed within a validation subset, so they are less complete than at test time
-    use2 = a.stage2 and f2 > f1
-    if use2:
-        m2.save_model(f"{a.model_dir}/lgb_stage2.txt")
-    json.dump({"thr": thr2 if use2 else thr1, "rel": 0.0, "stage2": bool(use2),
-               "val_f05_stage1": f1, "val_f05_stage2": f2, "feat_cols": feat_cols, "feat_cols2": cols2,
-               "grid_stage1": grid1, "grid_stage2": grid2}, open(f"{a.model_dir}/decision.json", "w"), indent=1)
+    json.dump({"thr": thr, "rel": 0.0, "prune_thr": a.prune_thr, "val_f05": fB, "feat_cols": feat_cols,
+               "pruner_cols": pcols, "grid_half_a": grid}, open(f"{a.model_dir}/decision.json", "w"), indent=1)
     imp = pd.Series(m1.feature_importance("gain"), index=feat_cols).sort_values(ascending=False)
     print(imp.head(30).to_string())
-    _, detail = scoring.macro_f05(va_b, vB, scoring.decide(vB, qB if use2 else pB, thr2 if use2 else thr1), truth_counts)
     detail.to_parquet(f"{a.model_dir}/val_detail.parquet")
-
 
 if __name__ == "__main__":
     main()
