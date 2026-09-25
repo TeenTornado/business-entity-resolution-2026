@@ -12,7 +12,7 @@ import blocking
 import features
 import scoring
 from io_utils import read_p23
-from train import add_candidate_features, load, prepare_candidates
+from train import add_candidate_features, load, prepare_candidates, read_spill
 
 
 def write_lists(path, header, P1_ids, i1, ids):
@@ -56,8 +56,13 @@ def main():
     log(f"retrieval candidates: {len(cand)} ({len(cand) / len(P1):.1f} per S1)")
     # candidate pruner: cheap features only; its survivors ARE the candidate set fed to the matcher
     pr = lgb.Booster(model_file=f"{a.model_dir}/lgb_pruner.txt")
-    cand = add_candidate_features(cand, P1, P23, cfg.get("offsets", []), pruner=pr, prune_thr=cfg["prune_thr"],
-                                  pruner_cols=cfg["pruner_cols"], log=log)
+    spill = f"{a.work}/{a.split}_candfeat_spill"
+    os.makedirs(spill, exist_ok=True)
+    add_candidate_features(cand, P1, P23, cfg.get("offsets", []), pruner=pr, prune_thr=cfg["prune_thr"],
+                           pruner_cols=cfg["pruner_cols"], log=log, spill=spill)
+    del cand
+    scoring._MEMO.clear()
+    cand = read_spill(spill)
     log(f"pruned candidate set: {len(cand)} pairs ({len(cand) / len(P1):.2f} per S1)")
     write_lists(f"{a.out}/candidate_pairs.tsv", "candidate_entity_ids", P1.entity_id.values,
                 cand.i1.values, P23.entity_id.values[cand.i2.values])

@@ -59,7 +59,7 @@ PRUNER_PARAMS = dict(objective="binary", learning_rate=0.1, num_leaves=63, min_d
 
 
 def add_candidate_features(cand, P1, P23, offsets, pruner=None, prune_thr=None, pruner_cols=None,
-                           chunk=250000, log=print):
+                           chunk=250000, log=print, spill=None):
     """Cheap candidate-level features (shared by train/predict).
     Graph features that need all S1s competing for a record (name-rank) are computed
     once on the full retrieval graph; everything else runs in S1 chunks. If a pruner
@@ -82,9 +82,33 @@ def add_candidate_features(cand, P1, P23, offsets, pruner=None, prune_thr=None, 
         if pruner is not None:
             q = pruner.predict(c[pruner_cols], num_threads=4)
             c = c[q >= prune_thr]
-        parts.append(c)
+        c = _downcast(c)
+        if spill is not None:
+            c.to_parquet(f"{spill}/part{len(parts):04d}.parquet")
+            parts.append(None)
+        else:
+            parts.append(c)
         log(f"  candidate features: {hi}/{len(cand)} rows")
+    if spill is not None:
+        return None  # caller frees the retrieval graph, then reads the spilled chunks
     return pd.concat(parts, ignore_index=True)
+
+
+def _downcast(df):
+    for col in df.columns:
+        if df[col].dtype == np.float64:
+            df[col] = df[col].astype(np.float32)
+        elif df[col].dtype == np.int64 and col not in ("i1", "i2"):
+            df[col] = pd.to_numeric(df[col], downcast="integer")
+    return df
+
+
+def read_spill(spill):
+    import glob
+    import shutil
+    out = pd.concat([pd.read_parquet(f) for f in sorted(glob.glob(f"{spill}/part*.parquet"))], ignore_index=True)
+    shutil.rmtree(spill)
+    return out
 
 
 PRUNER_FEATURES = scoring.PRUNER_COLS + scoring.VOCAB_COLS + scoring.SIB_COLS + scoring.NAME_GRAPH_COLS
@@ -112,7 +136,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--work", required=True)
     ap.add_argument("--model-dir", required=True)
-    ap.add_argument("--n-train", type=int, default=500000)
+    ap.add_argument("--n-train", type=int, default=400000)
     ap.add_argument("--n-val", type=int, default=150000)
     ap.add_argument("--rounds", type=int, default=3000)
     ap.add_argument("--ablate-pool", action="store_true", help="also train a matcher without pool-statistic features")
@@ -137,7 +161,12 @@ def main():
     P1, P23 = load(a.work, "train")
     sib_path = f"{a.work}/siblings.json"
     offsets = json.load(open(sib_path))["offsets"] if os.path.exists(sib_path) else []
-    cand = add_candidate_features(cand, P1, P23, offsets, log=log)
+    spill = f"{a.work}/train_candfeat_spill"
+    os.makedirs(spill, exist_ok=True)
+    add_candidate_features(cand, P1, P23, offsets, log=log, spill=spill)
+    del cand
+    scoring._MEMO.clear()
+    cand = read_spill(spill)
     log("candidate-level features done")
 
     # ---- stage A: candidate pruner (cheap features only) -> the candidate set
