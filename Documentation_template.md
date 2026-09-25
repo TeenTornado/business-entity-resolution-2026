@@ -1,7 +1,7 @@
 # ML Challenge 2026: Business Entity Resolution Solution
 
-**Team Name:** TeenTornado
-**Team Members:** Sreeram Kumar
+**Team Name:** Local Aura Farmers
+**Team Members:** Sreeram Kumar V R (Team Leader), Krishna Mohan S, Sricharan N S
 **Submission Date:** 2026-09-25
 
 ---
