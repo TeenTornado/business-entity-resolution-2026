@@ -24,3 +24,11 @@ is absent, AND (legal form differs OR a learned qualifier word is added OR k > 2
 Validation (train half B): 0.97824 -> 0.97875. Removes 0.124 / 0.039 / 0.082 accepted pairs per S1
 (US / India / France) on test. Expected public LB about 0.965-0.969.
 See research_forensics.md and research_france.md for the analysis.
+
+## v4 (next upload): `matching_results_v4.tsv.gz`
+Retrained model: address-only retrieval channel, house-number / street / legal-form recall features,
+name-rank features, training on train + simulated sibling groups (test-like), learned pruner.
+- Validation on test-like half B (never used for fitting/threshold): **0.9837** macro F0.5
+  (v2 scored 0.9782 on the easier sibling-free validation)
+- Candidate set: 5.36 per S1 (was 30)
+- The sibling veto is no longer needed (would remove only ~0.004 pairs/S1; slightly negative on validation)
