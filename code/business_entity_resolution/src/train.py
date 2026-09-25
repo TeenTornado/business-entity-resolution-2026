@@ -137,6 +137,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--model-dir", required=True)
     ap.add_argument("--n-train", type=int, default=400000)
+    ap.add_argument("--n-pruner", type=int, default=200000, help="train S1 entities used to fit the pruner")
     ap.add_argument("--n-val", type=int, default=150000)
     ap.add_argument("--rounds", type=int, default=3000)
     ap.add_argument("--ablate-pool", action="store_true", help="also train a matcher without pool-statistic features")
@@ -171,11 +172,20 @@ def main():
 
     # ---- stage A: candidate pruner (cheap features only) -> the candidate set
     pcols = PRUNER_FEATURES
+    del P1, P23  # free ~6 GB while the pruner trains; reloaded for pairwise features
+    import gc
+    gc.collect()
     is_tr, is_a, is_b = (cand.i1.isin(x).values for x in (tr_ids, va_a, va_b))
-    pr = lgb.train(PRUNER_PARAMS, lgb.Dataset(cand.loc[is_tr, pcols], cand.label[is_tr]), num_boost_round=800,
-                   valid_sets=[lgb.Dataset(cand.loc[is_a, pcols], cand.label[is_a])],
+    pr_tr = is_tr & cand.i1.isin(tr_ids[: a.n_pruner]).values
+    dtr = lgb.Dataset(cand.loc[pr_tr, pcols].to_numpy(np.float32), cand.label.values[pr_tr], feature_name=pcols)
+    dva = lgb.Dataset(cand.loc[is_a, pcols].to_numpy(np.float32), cand.label.values[is_a], feature_name=pcols,
+                      reference=dtr)
+    pr = lgb.train(PRUNER_PARAMS, dtr, num_boost_round=800, valid_sets=[dva],
                    callbacks=[lgb.early_stopping(30), lgb.log_evaluation(200)])
-    q = pr.predict(cand[pcols], num_iteration=pr.best_iteration)
+    del dtr, dva
+    gc.collect()
+    q = np.concatenate([pr.predict(cand[pcols].iloc[lo:lo + 2000000].to_numpy(np.float32),
+                                   num_iteration=pr.best_iteration) for lo in range(0, len(cand), 2000000)])
     kept = q >= a.prune_thr
     tot_b = truth_counts.reindex(va_b).fillna(0).sum()
     log(f"pruner: keep q>={a.prune_thr}: candidates/S1 (half B) {kept[is_b].sum() / len(va_b):.2f} "
@@ -184,6 +194,7 @@ def main():
     cand = cand[kept].reset_index(drop=True)
 
     # ---- stage B: pairwise matcher on the pruned candidate set
+    P1, P23 = load(a.work, "train")
     tables = features.build_df_tables([P1, P23])
     F = features.compute(cand, P1, P23, tables)
     del P1, P23, tables
