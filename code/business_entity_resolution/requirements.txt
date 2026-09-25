@@ -1,0 +1,11 @@
+# Python 3.11
+anyascii==0.3.3        # ISC  - Unicode -> ASCII fallback transliteration
+lightgbm==4.7.0        # MIT  - matching model
+llvmlite==0.49.0
+numba==0.67.0          # BSD  - fast per-row top-k in blocking
+numpy==2.4.6
+pandas==3.0.6
+pyarrow==25.0.1
+RapidFuzz==3.14.6      # MIT  - string similarity
+scikit-learn==1.9.1    # BSD  - HashingVectorizer
+scipy==1.17.1          # BSD  - sparse matrix products

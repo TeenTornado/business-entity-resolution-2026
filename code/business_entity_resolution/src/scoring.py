@@ -83,3 +83,34 @@ def macro_f05(s1_index, cand, keep, truth_counts):
     denom = 0.25 * df["T"] + df["P"]
     f = np.where(denom > 0, 1.25 * df["TP"] / denom.where(denom > 0, 1), 1.0)
     return float(f.mean()), df.assign(f=f)
+
+
+def freq_features(cand, P1, P23):
+    """How common is a name / address within its country? A unique name makes a
+    name-only (empty address) match safe; a very common one makes it risky."""
+    def codes(col):
+        k1 = P1.country.values.astype(object) + "|" + P1[col].values.astype(object)
+        k2 = P23.country.values.astype(object) + "|" + P23[col].values.astype(object)
+        c, _ = pd.factorize(np.concatenate([k1, k2]))
+        c1, c2 = c[: len(k1)], c[len(k1):]
+        m = c.max() + 1
+        return c1, c2, np.bincount(c1, minlength=m), np.bincount(c2, minlength=m)
+
+    n1, n2, nf1, nf2 = codes("n_core")
+    a1, a2, af1, af2 = codes("a_toks")
+    i1, i2 = cand.i1.values, cand.i2.values
+    cand["fq_name_a_s1"] = nf1[n1[i1]].astype(np.float32)
+    cand["fq_name_a_s23"] = nf2[n1[i1]].astype(np.float32)
+    cand["fq_name_b_s1"] = nf1[n2[i2]].astype(np.float32)
+    cand["fq_name_b_s23"] = nf2[n2[i2]].astype(np.float32)
+    cand["fq_addr_a_s1"] = af1[a1[i1]].astype(np.float32)
+    cand["fq_addr_b_s1"] = af1[a2[i2]].astype(np.float32)
+    cand["fq_addr_b_s23"] = af2[a2[i2]].astype(np.float32)
+    # number of this S1's candidates that share b's exact core name
+    cand["fq_name_b_in_cands"] = pd.DataFrame({"i1": i1, "k": n2[i2]}).groupby(["i1", "k"]).k.transform(
+        "size").astype(np.float32).values
+    return cand
+
+
+FREQ_COLS = ["fq_name_a_s1", "fq_name_a_s23", "fq_name_b_s1", "fq_name_b_s23", "fq_addr_a_s1",
+             "fq_addr_b_s1", "fq_addr_b_s23", "fq_name_b_in_cands"]

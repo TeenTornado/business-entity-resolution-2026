@@ -126,18 +126,19 @@ FEATURE_NAMES = [
 ]
 
 
-def build_df_tables(frames):
-    """Token document frequencies (S2/S3 pool + S1) for name-core and address tokens."""
-    ntab, atab = {}, {}
+def build_df_tables(frames, step=1000000):
+    """Token document frequencies (S1 + S2/S3 pool) for name-core and address tokens."""
+    import collections
+    ntab, atab = collections.Counter(), collections.Counter()
     n = 0
     for fr in frames:
         n += len(fr)
-        for col, tab in (("n_core", ntab), ("a_toks", atab)):
-            s = fr[col].str.split().map(lambda x: list(set(x))).explode().dropna()
-            vc = s.value_counts()
-            for k, v in vc.items():
-                tab[k] = tab.get(k, 0) + int(v)
-    return ntab, atab, n
+        for lo in range(0, len(fr), step):
+            part = fr.iloc[lo:lo + step]
+            for col, tab in (("n_core", ntab), ("a_toks", atab)):
+                for v in part[col].values:
+                    tab.update(set(v.split()))
+    return dict(ntab), dict(atab), n
 
 
 def compute(pairs, P1, P23, tables, workers=4, chunk=10000, outer=400000):

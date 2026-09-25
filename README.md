@@ -42,3 +42,17 @@ student_resource/
 
 Columns for every source file: `entity_id`, `business_name`, `business_address`,
 `country`. Files are **tab-separated** — read with `pd.read_csv(path, sep="\t")`.
+
+## Solution
+
+- **Pipeline code:** [`code/business_entity_resolution/`](code/business_entity_resolution/)
+- **Methodology write-up:** [`Documentation_template.md`](Documentation_template.md)
+- **Ready-to-submit files:** [`submission/`](submission/)
+
+The approach, in short:
+- Country-agnostic normalisation with a script→Latin dictionary learned from the train pairs.
+- IDF-cosine blocking with conjunction keys: top-30 candidates per S1 entity, 98.1 % pair recall.
+- A LightGBM matcher with string, candidate-graph and frequency features.
+- An F0.5-tuned threshold plus a one-owner assignment rule.
+
+**Held-out validation macro F0.5: 0.9782.**
