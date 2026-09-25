@@ -57,6 +57,8 @@ LEGAL_CORE_DROP = {
     "bv", "ag", "the", "and", "of", "dba", "france", "india", "usa", "us",
 }
 
+NON_LEGAL = {"the", "and", "of", "dba", "france", "india", "usa", "us"}
+
 # ------------------------------------------------------------ address tokens
 _ADDR_ABBR = {
     "st": "street", "str": "street", "rd": "road", "ave": "avenue", "av": "avenue",
@@ -149,6 +151,7 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 _MIXED_RE = re.compile(r"^(?=.*[a-z])(?=.*[0-9])[a-z0-9]+$")
 _DBA_RE = re.compile(r"\b(?:d\s*/\s*b\s*/\s*a|dba|d\.b\.a\.?|doing business as|t/a|trading as|aka|a/k/a)\b")
 _WEB_RE = re.compile(r"(?:https?://)?(?:www\.)?([a-z0-9\-]+)\.(?:com|net|org|in|co\.in|co|fr|biz|info|io|us)\b")
+_GLUED_RE = re.compile(r"\b(no|nos|hno|dno|fno|sno|plot|flat|door|house|shop|unit|apt|ste|suite|bldg)(\d)")
 _ORDINAL_RE = re.compile(r"^(\d+)(st|nd|rd|th)$")
 
 
@@ -220,7 +223,9 @@ def name_tokens(raw, tl=None):
     s = s.replace("'s ", "s ").replace("'", "")
     toks = [_fix_token(t) for t in _WORD_RE.findall(s)]
     toks = [LEGAL_MAP.get(t, t) for t in toks]
-    legal = frozenset(t for t in toks if t in LEGAL_CORE_DROP)
+    # legal-form set: genuine legal forms only (connectives / country words are
+    # dropped from the core name but must not count as a shared legal form)
+    legal = frozenset(t for t in toks if t in LEGAL_CORE_DROP and t not in NON_LEGAL)
     core = [t for t in toks if t not in LEGAL_CORE_DROP]
     if not core:
         core = [t for t in toks if t not in ("and", "the", "of")] or toks
@@ -245,6 +250,8 @@ def addr_parse(raw, tl=None):
     toks, nums, comps, state = [], [], [], ""
     for c in comps_raw:
         c2 = re.sub(r"[^a-z0-9/\-\s]", " ", c)
+        # house-number prefixes glued to the number: "no123", "hno12", "plot7" -> "no 123"
+        c2 = _GLUED_RE.sub(r"\1 \2", c2)
         c2 = re.sub(r"\s+", " ", c2).strip()
         if c2 in ("null", "n/a", "na", "none", ""):
             continue

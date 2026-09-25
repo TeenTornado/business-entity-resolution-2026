@@ -187,9 +187,9 @@ def main():
     a = ap.parse_args()
     t0 = time.time()
     cols = ["entity_id", "country", "n_core", "a_toks", "a_comps", "a_nums"]
-    P1 = pd.read_parquet(f"{a.work}/{a.split}_p1.parquet", columns=cols)
-    P23 = pd.concat([pd.read_parquet(f"{a.work}/{a.split}_p{s}.parquet", columns=cols) for s in (2, 3)],
-                    ignore_index=True)
+    from io_utils import read_p1, read_p23
+    P1 = read_p1(a.work, a.split, cols)
+    P23 = read_p23(a.work, a.split, cols)
     cand = run(P1, P23, cap=a.cap, k=a.k, workers=a.workers,
                log=lambda m: print(f"[{time.time() - t0:6.0f}s] {m}", flush=True))
     cand.to_parquet(f"{a.work}/{a.split}_cand.parquet")

@@ -53,6 +53,7 @@ def main():
     cand = prepare_candidates(cand, P23.entity_id)
     cand = scoring.freq_features(cand, P1, P23)
     cand = scoring.vocab_features(cand, P1, P23)
+    cand = scoring.sibling_features(cand, P1, P23, cfg.get("offsets", []))
     if "prune_thr" in cfg:
         # candidate pruner: cheap blocking-stage features only; its survivors ARE the candidate set
         nc, ac = blocking.split_cosines(P1, P23, cand)

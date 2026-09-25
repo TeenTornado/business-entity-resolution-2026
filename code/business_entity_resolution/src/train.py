@@ -12,15 +12,13 @@ import pandas as pd
 import blocking
 import features
 import scoring
+from io_utils import read_p1, read_p23
 
 FIELD_COLS = ["entity_id", "country"] + features.FIELDS
 
 
 def load(work, split):
-    P1 = pd.read_parquet(f"{work}/{split}_p1.parquet", columns=FIELD_COLS)
-    P23 = pd.concat([pd.read_parquet(f"{work}/{split}_p2.parquet", columns=FIELD_COLS),
-                     pd.read_parquet(f"{work}/{split}_p3.parquet", columns=FIELD_COLS)], ignore_index=True)
-    return P1, P23
+    return read_p1(work, split, FIELD_COLS), read_p23(work, split, FIELD_COLS)
 
 
 def add_labels(cand, P1, P23, gt):
@@ -86,9 +84,8 @@ def main():
     t0 = time.time()
     log = lambda m: print(f"[{time.time() - t0:7.0f}s] {m}", flush=True)  # noqa: E731
 
-    ids = pd.read_parquet(f"{a.work}/train_p1.parquet", columns=["entity_id"]).entity_id
-    ids23 = pd.concat([pd.read_parquet(f"{a.work}/train_p{s}.parquet", columns=["entity_id"]) for s in (2, 3)],
-                      ignore_index=True).entity_id
+    ids = read_p1(a.work, "train", ["entity_id"]).entity_id
+    ids23 = read_p23(a.work, "train", ["entity_id"]).entity_id
     gt = pd.read_parquet(f"{a.work}/train_gt.parquet")
     cand = prepare_candidates(pd.read_parquet(f"{a.work}/train_cand.parquet"), ids23)
     cand, truth_counts = add_labels(cand, ids.to_frame(), ids23.to_frame(), gt)
@@ -104,13 +101,16 @@ def main():
     P1, P23 = load(a.work, "train")
     cand = scoring.freq_features(cand, P1, P23)
     cand = scoring.vocab_features(cand, P1, P23)
+    sib_path = f"{a.work}/siblings.json"
+    offsets = json.load(open(sib_path))["offsets"] if os.path.exists(sib_path) else []
+    cand = scoring.sibling_features(cand, P1, P23, offsets)
     nc, ac = blocking.split_cosines(P1, P23, cand)
     cand = scoring.pruner_features(cand, P1, P23, nc, ac)
     del nc, ac
     log("context / frequency / pruner features done")
 
     # ---- stage A: candidate pruner (cheap features only) -> the candidate set
-    pcols = scoring.PRUNER_COLS + scoring.VOCAB_COLS
+    pcols = scoring.PRUNER_COLS + scoring.VOCAB_COLS + scoring.SIB_COLS
     is_tr, is_a, is_b = (cand.i1.isin(x).values for x in (tr_ids, va_a, va_b))
     pr = lgb.train(PRUNER_PARAMS, lgb.Dataset(cand.loc[is_tr, pcols], cand.label[is_tr]), num_boost_round=800,
                    valid_sets=[lgb.Dataset(cand.loc[is_a, pcols], cand.label[is_a])],
@@ -139,7 +139,7 @@ def main():
     cand = pd.concat([cand, F.set_index(cand.index)], axis=1)
     del F
     feat_cols = features.FEATURE_NAMES + scoring.CONTEXT_COLS + scoring.FREQ_COLS + scoring.VOCAB_COLS + \
-        ["pr_name_cos", "pr_addr_cos"]
+        scoring.SIB_COLS + ["pr_name_cos", "pr_addr_cos"]
     tr = cand[cand.i1.isin(tr_ids)]
     vA = cand[cand.i1.isin(va_a)].reset_index(drop=True)
     vB = cand[cand.i1.isin(va_b)].reset_index(drop=True)
@@ -162,7 +162,7 @@ def main():
     os.makedirs(a.model_dir, exist_ok=True)
     pr.save_model(f"{a.model_dir}/lgb_pruner.txt", num_iteration=pr.best_iteration)
     m1.save_model(f"{a.model_dir}/lgb_stage1.txt", num_iteration=m1.best_iteration)
-    json.dump({"thr": thr, "rel": 0.0, "prune_thr": a.prune_thr, "val_f05": fB, "feat_cols": feat_cols,
+    json.dump({"thr": thr, "rel": 0.0, "prune_thr": a.prune_thr, "offsets": offsets, "val_f05": fB, "feat_cols": feat_cols,
                "pruner_cols": pcols, "grid_half_a": grid}, open(f"{a.model_dir}/decision.json", "w"), indent=1)
     imp = pd.Series(m1.feature_importance("gain"), index=feat_cols).sort_values(ascending=False)
     print(imp.head(30).to_string())

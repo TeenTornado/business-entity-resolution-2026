@@ -19,11 +19,14 @@ python3 learn_translit.py --work "$WORK" --out "$WORK/translit.json"
 python3 preprocess.py --data "$DATA" --work "$WORK" --split train --translit "$WORK/translit.json"
 python3 preprocess.py --data "$DATA" --work "$WORK" --split test  --translit "$WORK/translit.json"
 
+# 2b. simulate test-like sibling distractor groups in the TRAIN pool (train data only)
+python3 simulate_siblings.py --work "$WORK" --translit "$WORK/translit.json"
+
 # 3. candidate generation
 python3 blocking.py --work "$WORK" --split train
 python3 blocking.py --work "$WORK" --split test
 
-# 4. train matcher + tune F0.5 decision rule on held-out train S1 entities
+# 4. train candidate pruner + matcher; tune the F0.5 threshold on held-out train S1 entities
 python3 train.py --work "$WORK" --model-dir "$MODEL"
 
 # 5. test inference -> output/candidate_pairs.tsv, output/matching_results.tsv

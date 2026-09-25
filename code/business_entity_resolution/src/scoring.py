@@ -141,14 +141,9 @@ PRUNER_COLS = CONTEXT_COLS + FREQ_COLS + ["pr_name_cos", "pr_addr_cos", "pr_name
                                           "pr_b_addr_empty"]
 
 
-def vocab_features(cand, P1, P23):
-    """Name-token vocabulary skew between the reference (S1) pool and the S2/S3 pool,
-    per country. Tokens that are common in S2/S3 but rare in S1 (e.g. shop-type words
-    used mostly by businesses absent from S1) signal records that likely have no S1 match."""
+def _token_counts(P1, P23):
     import collections
-    import math
-    out1 = np.zeros((len(P1), 2), np.float32)
-    out2 = np.zeros((len(P23), 2), np.float32)
+    tabs = {}
     for country in pd.unique(P1.country.values):
         m1 = P1.country.values == country
         m2 = P23.country.values == country
@@ -157,20 +152,80 @@ def vocab_features(cand, P1, P23):
             c1.update(set(v.split()))
         for v in P23.n_core.values[m2]:
             c2.update(set(v.split()))
-        base = np.log((m2.sum() + 1) / (m1.sum() + 1))
-        for mask, out in ((m1, out1), (m2, out2)):
-            idx = np.flatnonzero(mask)
-            for j, v in zip(idx, P1.n_core.values[idx] if out is out1 else P23.n_core.values[idx]):
+        tabs[country] = (c1, c2, float(np.log((m2.sum() + 1) / (m1.sum() + 1))))
+    return tabs
+
+
+def vocab_features(cand, P1, P23):
+    """Name-token vocabulary skew between the reference (S1) pool and the S2/S3 pool,
+    per country. Tokens that are common in S2/S3 but rare in S1 (e.g. shop-type words
+    or qualifiers used mostly by businesses absent from S1) signal records that likely
+    have no S1 match. Also: the strongest-skewed token that the S2/S3 name ADDS on top
+    of the S1 name (a qualifier such as 'Holdings' or 'Groupe' added to a near-copy)."""
+    import math
+    tabs = _token_counts(P1, P23)
+
+    def rec_skew(P, idx_all):
+        out = np.zeros((len(P), 2), np.float32)
+        for country, (c1, c2, base) in tabs.items():
+            idx = np.flatnonzero(P.country.values == country)
+            for j, v in zip(idx, P.n_core.values[idx]):
                 toks = v.split()
-                if not toks:
-                    continue
-                r = [math.log((c2.get(t, 0) + 1) / (c1.get(t, 0) + 1)) - base for t in toks]
-                out[j, 0] = max(r)
-                out[j, 1] = sum(r) / len(r)
+                if toks:
+                    r = [math.log((c2.get(t, 0) + 1) / (c1.get(t, 0) + 1)) - base for t in toks]
+                    out[j, 0] = max(r)
+                    out[j, 1] = sum(r) / len(r)
+        return out
+
+    out1, out2 = rec_skew(P1, None), rec_skew(P23, None)
     cand["vc_skew_max_b"] = out2[cand.i2.values, 0]
     cand["vc_skew_mean_b"] = out2[cand.i2.values, 1]
     cand["vc_skew_max_a"] = out1[cand.i1.values, 0]
+    added = np.full(len(cand), -9.0, np.float32)
+    ctry = P1.country.values[cand.i1.values]
+    na, nb = P1.n_core.values[cand.i1.values], P23.n_core.values[cand.i2.values]
+    for j in range(len(cand)):
+        extra = set(nb[j].split()) - set(na[j].split())
+        if extra:
+            c1, c2, base = tabs[ctry[j]]
+            added[j] = max(math.log((c2.get(t, 0) + 1) / (c1.get(t, 0) + 1)) - base for t in extra)
+    cand["vc_added_skew"] = added
     return cand
 
 
-VOCAB_COLS = ["vc_skew_max_b", "vc_skew_mean_b", "vc_skew_max_a"]
+VOCAB_COLS = ["vc_skew_max_b", "vc_skew_mean_b", "vc_skew_max_a", "vc_added_skew"]
+
+
+def _digits(s):
+    return [int(t) for t in s.split() if t.isdigit() and len(t) <= 6]
+
+
+def sibling_features(cand, P1, P23, offsets):
+    """House-number relation between the S1 record and the candidate, and the size of
+    the candidate's number group within this S1's candidate list. Sibling distractors
+    carry the S1 number shifted by a learned offset k and come in groups of 1-3 records
+    that repeat the SAME shifted number, distinct from the S1's exact-number group."""
+    K = set(offsets)
+    fa = np.array([(d[0] if d else -1) for d in map(_digits, P1.a_nums.values)], np.int64)
+    fb = np.array([(d[0] if d else -1) for d in map(_digits, P23.a_nums.values)], np.int64)
+    A, B = fa[cand.i1.values], fb[cand.i2.values]
+    both = (A >= 0) & (B >= 0)
+    cand["sb_first_diff"] = np.where(both, np.clip(B - A, -100, 100), -999).astype(np.int16)
+    cand["sb_exact_first"] = np.where(both, (A == B).astype(np.int8), -1).astype(np.int8)
+    na, nb = P1.a_nums.values[cand.i1.values], P23.a_nums.values[cand.i2.values]
+    offk = np.zeros(len(cand), np.int8)
+    for j in range(len(cand)):
+        if not both[j]:
+            continue
+        da, db = set(_digits(na[j])), set(_digits(nb[j]))
+        if any((x - y) in K for x in db - da for y in da):
+            offk[j] = 1
+    cand["sb_off_k"] = offk
+    g = pd.DataFrame({"i1": cand.i1.values, "b": B, "exact": (A == B) & both, "offk": offk.astype(bool)})
+    cand["sb_grp_b"] = np.where(B >= 0, g.groupby(["i1", "b"]).b.transform("size").values, -1).astype(np.int16)
+    cand["sb_grp_exact"] = g.groupby("i1").exact.transform("sum").values.astype(np.int16)
+    cand["sb_grp_offk"] = g.groupby("i1").offk.transform("sum").values.astype(np.int16)
+    return cand
+
+
+SIB_COLS = ["sb_first_diff", "sb_exact_first", "sb_off_k", "sb_grp_b", "sb_grp_exact", "sb_grp_offk"]
