@@ -191,12 +191,12 @@ def run(P1, P23, cap=3000, k=30, k_addr=10, workers=4, log=print):
             V1, V2, _ = weight(Y1, Y2, cap)
             del Y1, Y2
             ra, ca, sa = _topk_pool(V1, V2.T.tocsr(), k_addr, len(idx1), workers)
-            main_keys = set(zip(r.tolist(), c.tolist()))
-            new = np.array([(x, y) not in main_keys for x, y in zip(ra.tolist(), ca.tolist())], bool)
-            del main_keys
-            r_new, c_new = ra[new], ca[new]
+            n2 = np.int64(len(idx2))
+            new = ~np.isin(ra.astype(np.int64) * n2 + ca, r.astype(np.int64) * n2 + c)
+            r_new, c_new, sa_keep = ra[new], ca[new], sa[new]
+            del ra, ca, sa
             s_new = _rowdot(W1, W2, r_new, c_new)
-            addr_all = np.concatenate([_rowdot(V1, V2, r, c), sa[new]])
+            addr_all = np.concatenate([_rowdot(V1, V2, r, c), sa_keep])
             r, c, s = np.concatenate([r, r_new]), np.concatenate([c, c_new]), np.concatenate([s, s_new])
             del V1, V2
         else:
