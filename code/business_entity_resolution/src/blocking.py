@@ -133,12 +133,42 @@ def _work(bounds):
     return np.concatenate(rs), np.concatenate(cs), np.concatenate(ss)
 
 
-def run(P1, P23, cap=3000, k=30, workers=4, log=print):
+def addr_doc(a_toks, a_comps):
+    """Address-only bag of tokens: finds copies whose NAME was replaced (pseudo-word
+    or trade name) but whose address is intact; these rank low in the main channel."""
+    t = ["a:" + x for x in a_toks.split() if len(x) >= 2 or x.isdigit()]
+    for comp in a_comps.split("|"):
+        ct = comp.split()
+        t += ["b:" + x + "_" + y for x, y in zip(ct, ct[1:])]
+    return " ".join(t)
+
+
+def _topk_pool(W1, W2T, k, n, workers):
+    from multiprocessing import Pool
+    _SHARED.update(W1=W1, W2T=W2T, k=k)
+    step = 20000
+    bounds = [(i, min(i + step, n)) for i in range(0, n, step)]
+    with Pool(workers) as pool:
+        parts = pool.map(_work, bounds, chunksize=1)
+    _SHARED.clear()
+    return (np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts]),
+            np.concatenate([p[2] for p in parts]))
+
+
+def _rowdot(A, B, r, c, chunk=2000000):
+    out = np.zeros(len(r), np.float32)
+    for lo in range(0, len(r), chunk):
+        out[lo:lo + chunk] = np.asarray(A[r[lo:lo + chunk]].multiply(B[c[lo:lo + chunk]]).sum(axis=1)).ravel()
+    return out
+
+
+def run(P1, P23, cap=3000, k=30, k_addr=10, workers=4, log=print):
     """Generate candidates for every S1 row. Countries are treated as an open
     set: each label present in S1 is blocked against the S2/S3 records with the
     same label (in training data, 100% of true pairs share the country label).
-    Returns DataFrame(i1, i2, blk_score, blk_rank) with positional indices."""
-    from multiprocessing import Pool
+    Two retrieval channels are unioned: the main name+address channel (top-k) and
+    an address-only channel (top-k_addr).
+    Returns DataFrame(i1, i2, blk_score, blk_rank, blk_addr, via_addr) with positional indices."""
     import pandas as pd
 
     out = []
@@ -153,52 +183,35 @@ def run(P1, P23, cap=3000, k=30, workers=4, log=print):
         del docs1, docs2
         W1, W2, _ = weight(X1, X2, cap)
         del X1, X2
-        _SHARED.update(W1=W1, W2T=W2.T.tocsr(), k=k)
-        del W2
-        step = 20000
-        bounds = [(i, min(i + step, len(idx1))) for i in range(0, len(idx1), step)]
-        with Pool(workers) as pool:
-            parts = pool.map(_work, bounds, chunksize=1)
-        r = np.concatenate([p[0] for p in parts])
-        c = np.concatenate([p[1] for p in parts])
-        s = np.concatenate([p[2] for p in parts])
-        df = pd.DataFrame({"i1": idx1[r], "i2": idx2[c], "blk_score": s})
+        r, c, s = _topk_pool(W1, W2.T.tocsr(), k, len(idx1), workers)
+        n_main = len(r)
+        if k_addr > 0:
+            Y1 = vectorize([addr_doc(a, b) for a, b in zip(P1.a_toks.values[idx1], P1.a_comps.values[idx1])])
+            Y2 = vectorize([addr_doc(a, b) for a, b in zip(P23.a_toks.values[idx2], P23.a_comps.values[idx2])])
+            V1, V2, _ = weight(Y1, Y2, cap)
+            del Y1, Y2
+            ra, ca, sa = _topk_pool(V1, V2.T.tocsr(), k_addr, len(idx1), workers)
+            main_keys = set(zip(r.tolist(), c.tolist()))
+            new = np.array([(x, y) not in main_keys for x, y in zip(ra.tolist(), ca.tolist())], bool)
+            del main_keys
+            r_new, c_new = ra[new], ca[new]
+            s_new = _rowdot(W1, W2, r_new, c_new)
+            addr_all = np.concatenate([_rowdot(V1, V2, r, c), sa[new]])
+            r, c, s = np.concatenate([r, r_new]), np.concatenate([c, c_new]), np.concatenate([s, s_new])
+            del V1, V2
+        else:
+            addr_all = np.zeros(len(r), np.float32)
+        via = np.zeros(len(r), np.int8)
+        via[n_main:] = 1
+        df = pd.DataFrame({"i1": idx1[r].astype(np.int32), "i2": idx2[c].astype(np.int32), "blk_score": s.astype(np.float32),
+                           "blk_addr": addr_all.astype(np.float32), "via_addr": via})
         out.append(df)
-        _SHARED.clear()
-        log(f"blocking {country}: S1={len(idx1)} S23={len(idx2)} pairs={len(df)}")
+        del W1, W2
+        log(f"blocking {country}: S1={len(idx1)} S23={len(idx2)} pairs={len(df)} (address channel added {int(via.sum())})")
     cand = pd.concat(out, ignore_index=True)
     cand = cand.sort_values(["i1", "blk_score"], ascending=[True, False], kind="stable").reset_index(drop=True)
     cand["blk_rank"] = cand.groupby("i1").cumcount().astype(np.int16)
     return cand
-
-
-def main():
-    import argparse
-    import time
-
-    import pandas as pd
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--work", required=True)
-    ap.add_argument("--split", required=True)
-    ap.add_argument("--cap", type=int, default=3000)
-    ap.add_argument("--k", type=int, default=30)
-    ap.add_argument("--workers", type=int, default=4)
-    a = ap.parse_args()
-    t0 = time.time()
-    cols = ["entity_id", "country", "n_core", "a_toks", "a_comps", "a_nums"]
-    from io_utils import read_p1, read_p23
-    P1 = read_p1(a.work, a.split, cols)
-    P23 = read_p23(a.work, a.split, cols)
-    cand = run(P1, P23, cap=a.cap, k=a.k, workers=a.workers,
-               log=lambda m: print(f"[{time.time() - t0:6.0f}s] {m}", flush=True))
-    cand.to_parquet(f"{a.work}/{a.split}_cand.parquet")
-    print(f"candidates={len(cand)} for S1={len(P1)}", flush=True)
-
-
-if __name__ == "__main__":
-    main()
-
 
 def split_cosines(P1, P23, cand, chunk=2000000):
     """Name-only and address-only IDF cosine for each candidate pair (cheap sparse
@@ -240,3 +253,31 @@ def split_cosines(P1, P23, cand, chunk=2000000):
                 out[r] = np.asarray(a.multiply(b).sum(axis=1)).ravel()
             del W1, W2
     return name_cos, addr_cos
+
+
+def main():
+    import argparse
+    import time
+
+    from io_utils import read_p1, read_p23
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--work", required=True)
+    ap.add_argument("--split", required=True)
+    ap.add_argument("--cap", type=int, default=3000)
+    ap.add_argument("--k", type=int, default=30)
+    ap.add_argument("--k-addr", type=int, default=10)
+    ap.add_argument("--workers", type=int, default=4)
+    a = ap.parse_args()
+    t0 = time.time()
+    cols = ["entity_id", "country", "n_core", "a_toks", "a_comps", "a_nums"]
+    P1 = read_p1(a.work, a.split, cols)
+    P23 = read_p23(a.work, a.split, cols)
+    cand = run(P1, P23, cap=a.cap, k=a.k, k_addr=a.k_addr, workers=a.workers,
+               log=lambda m: print(f"[{time.time() - t0:6.0f}s] {m}", flush=True))
+    cand.to_parquet(f"{a.work}/{a.split}_cand.parquet")
+    print(f"candidates={len(cand)} for S1={len(P1)}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

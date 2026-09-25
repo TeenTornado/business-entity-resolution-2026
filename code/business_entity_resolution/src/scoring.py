@@ -3,6 +3,16 @@ import numpy as np
 import pandas as pd
 
 
+_MEMO = {}
+
+
+def _memo(P1, P23, tag, fn):
+    key = (id(P1), id(P23), tag)
+    if key not in _MEMO:
+        _MEMO[key] = fn()
+    return _MEMO[key]
+
+
 def context_features(cand):
     """Features derived from the whole candidate graph (cheap, vectorised).
 
@@ -29,29 +39,7 @@ def context_features(cand):
     return cand
 
 
-CONTEXT_COLS = ["blk_score", "blk_rank", "blk_rel", "blk_n1", "blk_top_gap", "rev_n", "rev_rank", "rev_best_other", "rev_margin", "src3"]
-
-
-def prob_context(cand, p):
-    """Second-order features from first-pass probabilities (used by the stage-2 model)."""
-    cand = cand.assign(p1=p)
-    g1 = cand.groupby("i1").p1
-    cand["p1_max_i1"] = g1.transform("max")
-    cand["p1_rank_i1"] = g1.rank(ascending=False, method="first") - 1
-    cand["p1_sum_i1"] = g1.transform("sum")
-    cand["p1_n_hi_i1"] = (cand.p1 > 0.5).groupby(cand.i1).transform("sum")
-    g2 = cand.groupby("i2").p1
-    mx2 = g2.transform("max")
-    cand["p1_rank_i2"] = g2.rank(ascending=False, method="first") - 1
-    s = cand[["i2", "p1"]].sort_values(["i2", "p1"], ascending=[True, False])
-    sec = s.groupby("i2").p1.nth(1)
-    sec_map = pd.Series(sec.values, index=s.loc[sec.index, "i2"].values)
-    sec_v = cand.i2.map(sec_map).fillna(0).values
-    cand["p1_other_i2"] = np.where(cand.p1.values >= mx2.values, sec_v, mx2.values)
-    return cand
-
-
-PROB_COLS = ["p1", "p1_max_i1", "p1_rank_i1", "p1_sum_i1", "p1_n_hi_i1", "p1_rank_i2", "p1_other_i2"]
+CONTEXT_COLS = ["blk_score", "blk_addr", "via_addr", "blk_rank", "blk_rel", "blk_n1", "blk_top_gap", "rev_n", "rev_rank", "rev_best_other", "rev_margin", "src3"]
 
 
 def decide(cand, p, thr, one_owner=True, rel=0.0):
@@ -89,12 +77,14 @@ def freq_features(cand, P1, P23):
     """How common is a name / address within its country? A unique name makes a
     name-only (empty address) match safe; a very common one makes it risky."""
     def codes(col):
-        k1 = P1.country.values.astype(object) + "|" + P1[col].values.astype(object)
-        k2 = P23.country.values.astype(object) + "|" + P23[col].values.astype(object)
-        c, _ = pd.factorize(np.concatenate([k1, k2]))
-        c1, c2 = c[: len(k1)], c[len(k1):]
-        m = c.max() + 1
-        return c1, c2, np.bincount(c1, minlength=m), np.bincount(c2, minlength=m)
+        def build():
+            k1 = P1.country.values.astype(object) + "|" + P1[col].values.astype(object)
+            k2 = P23.country.values.astype(object) + "|" + P23[col].values.astype(object)
+            c, _ = pd.factorize(np.concatenate([k1, k2]))
+            c1, c2 = c[: len(k1)], c[len(k1):]
+            m = c.max() + 1
+            return c1, c2, np.bincount(c1, minlength=m), np.bincount(c2, minlength=m)
+        return _memo(P1, P23, "codes_" + col, build)
 
     n1, n2, nf1, nf2 = codes("n_core")
     a1, a2, af1, af2 = codes("a_toks")
@@ -119,18 +109,23 @@ FREQ_COLS = ["fq_name_a_s1", "fq_name_a_s23", "fq_name_b_s1", "fq_name_b_s23", "
 def pruner_features(cand, P1, P23, name_cos, addr_cos):
     """Cheap, fully vectorised pair signals for the candidate pruner."""
     def eq(col):
-        c, _ = pd.factorize(np.concatenate([P1[col].values, P23[col].values]))
-        a, b = c[: len(P1)], c[len(P1):]
+        def build():
+            c, _ = pd.factorize(np.concatenate([P1[col].values, P23[col].values]))
+            return c[: len(P1)], c[len(P1):]
+        a, b = _memo(P1, P23, "eq_" + col, build)
         return (a[cand.i1.values] == b[cand.i2.values]).astype(np.int8)
 
-    cand["pr_name_cos"] = name_cos
-    cand["pr_addr_cos"] = addr_cos
+    if name_cos is not None:
+        cand["pr_name_cos"] = name_cos
+        cand["pr_addr_cos"] = addr_cos
     cand["pr_name_eq"] = eq("n_core")
     cand["pr_addr_eq"] = eq("a_toks")
-    first = lambda s: s.str.split(" ", n=1).str[0]  # noqa: E731
-    f1, f2 = first(P1.a_nums), first(P23.a_nums)
-    c, _ = pd.factorize(np.concatenate([f1.values, f2.values]))
-    a, b = c[: len(P1)], c[len(P1):]
+    def build_first():
+        first = lambda s: s.str.split(" ", n=1).str[0]  # noqa: E731
+        f1, f2 = first(P1.a_nums), first(P23.a_nums)
+        c, _ = pd.factorize(np.concatenate([f1.values, f2.values]))
+        return f1, f2, c[: len(P1)], c[len(P1):]
+    f1, f2, a, b = _memo(P1, P23, "first_num", build_first)
     has = (f1.values[cand.i1.values] != "") & (f2.values[cand.i2.values] != "")
     cand["pr_num_eq"] = np.where(has, (a[cand.i1.values] == b[cand.i2.values]).astype(np.int8), -1).astype(np.int8)
     cand["pr_b_addr_empty"] = (P23.a_toks.values[cand.i2.values] == "").astype(np.int8)
@@ -163,7 +158,7 @@ def vocab_features(cand, P1, P23):
     have no S1 match. Also: the strongest-skewed token that the S2/S3 name ADDS on top
     of the S1 name (a qualifier such as 'Holdings' or 'Groupe' added to a near-copy)."""
     import math
-    tabs = _token_counts(P1, P23)
+    tabs = _memo(P1, P23, "token_counts", lambda: _token_counts(P1, P23))
 
     def rec_skew(P, idx_all):
         out = np.zeros((len(P), 2), np.float32)
@@ -177,7 +172,7 @@ def vocab_features(cand, P1, P23):
                     out[j, 1] = sum(r) / len(r)
         return out
 
-    out1, out2 = rec_skew(P1, None), rec_skew(P23, None)
+    out1, out2 = _memo(P1, P23, "rec_skew", lambda: (rec_skew(P1, None), rec_skew(P23, None)))
     cand["vc_skew_max_b"] = out2[cand.i2.values, 0]
     cand["vc_skew_mean_b"] = out2[cand.i2.values, 1]
     cand["vc_skew_max_a"] = out1[cand.i1.values, 0]
@@ -206,21 +201,35 @@ def sibling_features(cand, P1, P23, offsets):
     carry the S1 number shifted by a learned offset k and come in groups of 1-3 records
     that repeat the SAME shifted number, distinct from the S1's exact-number group."""
     K = set(offsets)
-    fa = np.array([(d[0] if d else -1) for d in map(_digits, P1.a_nums.values)], np.int64)
-    fb = np.array([(d[0] if d else -1) for d in map(_digits, P23.a_nums.values)], np.int64)
+    fa, fb = _memo(P1, P23, "first_digits", lambda: (
+        np.array([(d[0] if d else -1) for d in map(_digits, P1.a_nums.values)], np.int64),
+        np.array([(d[0] if d else -1) for d in map(_digits, P23.a_nums.values)], np.int64)))
     A, B = fa[cand.i1.values], fb[cand.i2.values]
     both = (A >= 0) & (B >= 0)
     cand["sb_first_diff"] = np.where(both, np.clip(B - A, -100, 100), -999).astype(np.int16)
     cand["sb_exact_first"] = np.where(both, (A == B).astype(np.int8), -1).astype(np.int8)
     na, nb = P1.a_nums.values[cand.i1.values], P23.a_nums.values[cand.i2.values]
     offk = np.zeros(len(cand), np.int8)
+    off_first = np.zeros(len(cand), np.int8)
+    kmin = np.zeros(len(cand), np.int16)
     for j in range(len(cand)):
         if not both[j]:
             continue
-        da, db = set(_digits(na[j])), set(_digits(nb[j]))
-        if any((x - y) in K for x in db - da for y in da):
+        la, lb = _digits(na[j]), _digits(nb[j])
+        da, db = set(la), set(lb)
+        extra = db - da
+        if any((x - y) in K for x in extra for y in da):
             offk[j] = 1
+        if la[0] not in db:
+            ks = [x - la[0] for x in extra if (x - la[0]) in K]
+            if ks:
+                off_first[j] = 1
+                kmin[j] = min(ks)
     cand["sb_off_k"] = offk
+    cand["sb_off_first"] = off_first
+    cand["sb_kmin"] = kmin
+    la_, lb_ = P1.n_legal.values[cand.i1.values], P23.n_legal.values[cand.i2.values]
+    cand["sb_lg_diff"] = np.fromiter((set(x.split()) != set(y.split()) for x, y in zip(la_, lb_)), np.int8, len(cand))
     g = pd.DataFrame({"i1": cand.i1.values, "b": B, "exact": (A == B) & both, "offk": offk.astype(bool)})
     cand["sb_grp_b"] = np.where(B >= 0, g.groupby(["i1", "b"]).b.transform("size").values, -1).astype(np.int16)
     cand["sb_grp_exact"] = g.groupby("i1").exact.transform("sum").values.astype(np.int16)
@@ -228,4 +237,40 @@ def sibling_features(cand, P1, P23, offsets):
     return cand
 
 
-SIB_COLS = ["sb_first_diff", "sb_exact_first", "sb_off_k", "sb_grp_b", "sb_grp_exact", "sb_grp_offk"]
+SIB_COLS = ["sb_first_diff", "sb_exact_first", "sb_off_k", "sb_off_first", "sb_kmin", "sb_lg_diff", "sb_grp_b",
+            "sb_grp_exact", "sb_grp_offk"]
+
+
+def name_graph_features(cand):
+    """For each S2/S3 record: how does this S1 rank by NAME similarity among all S1
+    candidates of the record? Decisive for records with an empty address, where the
+    blocking score is name-only and several S1 businesses may share the name."""
+    g = cand.groupby("i2").pr_name_cos
+    cand["rn_name_rank"] = (g.rank(ascending=False, method="min") - 1).astype(np.int16).values
+    best = g.transform("max").values
+    s = cand[["i2", "pr_name_cos"]].sort_values(["i2", "pr_name_cos"], ascending=[True, False])
+    second = s.groupby("i2").pr_name_cos.nth(1)
+    sec_map = pd.Series(second.values, index=s.loc[second.index, "i2"].values)
+    sec = cand.i2.map(sec_map).fillna(0).values
+    other = np.where(cand.pr_name_cos.values >= best, sec, best)
+    cand["rn_name_margin"] = (cand.pr_name_cos.values - other).astype(np.float32)
+    cand["rn_name_eq_count"] = cand.groupby("i2").pr_name_eq.transform("sum").astype(np.int16).values
+    return cand
+
+
+NAME_GRAPH_COLS = ["rn_name_rank", "rn_name_margin", "rn_name_eq_count"]
+
+
+def sibling_veto(cand, keep, skew_thr=1.0):
+    """Reject accepted pairs that look like a sibling distractor: the record carries the
+    S1's first house number shifted by a learned offset (and not the S1's own number),
+    AND the legal form differs, or it adds a word over-represented in S2/S3 vs S1
+    (a qualifier such as Holdings / Groupe), or the offset is > 2 (true copies only
+    show +/-1..2 typo shifts). All ingredients are learned from training data or are
+    label-free pool statistics, so the rule is country-agnostic."""
+    v = (cand.sb_off_first.values == 1) & (
+        (cand.sb_lg_diff.values == 1) | (cand.vc_added_skew.values >= skew_thr) | (cand.sb_kmin.values > 2))
+    return keep & v
+
+
+POOL_COLS = ["rev_n", "rev_rank", "rev_best_other", "rev_margin", "blk_n1"] + FREQ_COLS + NAME_GRAPH_COLS

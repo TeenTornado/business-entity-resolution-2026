@@ -54,7 +54,7 @@ for canon, vs in _LEGAL.items():
 LEGAL_CORE_DROP = {
     "pvt", "ltd", "inc", "corp", "co", "llc", "llp", "lp", "plc", "pllc", "pc",
     "pa", "public", "sarl", "sas", "sasu", "eurl", "sa", "snc", "ei", "gmbh",
-    "bv", "ag", "the", "and", "of", "dba", "france", "india", "usa", "us",
+    "bv", "ag", "sci", "the", "and", "of", "dba", "france", "india", "usa", "us",
 }
 
 NON_LEGAL = {"the", "and", "of", "dba", "france", "india", "usa", "us"}
@@ -151,6 +151,7 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 _MIXED_RE = re.compile(r"^(?=.*[a-z])(?=.*[0-9])[a-z0-9]+$")
 _DBA_RE = re.compile(r"\b(?:d\s*/\s*b\s*/\s*a|dba|d\.b\.a\.?|doing business as|t/a|trading as|aka|a/k/a)\b")
 _WEB_RE = re.compile(r"(?:https?://)?(?:www\.)?([a-z0-9\-]+)\.(?:com|net|org|in|co\.in|co|fr|biz|info|io|us)\b")
+_DOTTED_RE = re.compile(r"(?<![a-z0-9])(?:[a-z]\.){2,}[a-z]?\.?(?![a-z0-9])")
 _GLUED_RE = re.compile(r"\b(no|nos|hno|dno|fno|sno|plot|flat|door|house|shop|unit|apt|ste|suite|bldg)(\d)")
 _ORDINAL_RE = re.compile(r"^(\d+)(st|nd|rd|th)$")
 
@@ -182,6 +183,14 @@ def _basic(text):
     return text
 
 
+def _ordinal(n):
+    if 10 <= n % 100 <= 20:
+        suf = "th"
+    else:
+        suf = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suf}"
+
+
 def _fix_token(t):
     if _MIXED_RE.match(t) and not t[0].isdigit():
         # letters with embedded digits -> probable OCR/leet noise ("chemica1s")
@@ -189,7 +198,8 @@ def _fix_token(t):
     if _MIXED_RE.match(t) and t[0].isdigit():
         m = _ORDINAL_RE.match(t)
         if m:
-            return str(int(m.group(1))) + m.group(2)
+            # canonical ordinal suffix: noisy "126nd" / "105rd" -> "126th" / "105th"
+            return _ordinal(int(m.group(1)))
         # "5ervices" style: leading digit followed by letters only
         if len(t) > 3 and t[1:].isalpha():
             return t.translate(_LEET)
@@ -211,6 +221,8 @@ def name_tokens(raw, tl=None):
     w = _WEB_RE.search(s)
     if w:
         s = s[: w.start()] + " " + w.group(1).replace("-", " ") + " " + s[w.end():]
+    # dotted acronyms / legal forms: "s.a.s.u." "e.u.r.l." "l.l.c." -> "sasu" "eurl" "llc"
+    s = _DOTTED_RE.sub(lambda m: " " + m.group(0).replace(".", "") + " ", s)
     s = s.replace("&", " and ").replace("+", " and ")
     s = re.sub(r"\bl\.?\s?l\.?\s?c\b\.?", " llc ", s)
     s = re.sub(r"\bl\.?\s?l\.?\s?p\b\.?", " llp ", s)

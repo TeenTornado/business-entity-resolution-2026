@@ -110,6 +110,27 @@ def pair_features(rows):
         f.append(max(_idf(t, atab, nn) for t in xa & xb) if xa & xb else 0.0)
         # ---- combined
         f.append(fuzz.token_set_ratio(a_core + " " + a_at, b_core + " " + b_at))
+        # ---- v4: house-number noise vs sibling offsets, street words without numbers, legal add/drop
+        da = [x for x in na if x.isdigit()]
+        db = [x for x in nb if x.isdigit()]
+        if da and db:
+            ha, hb = da[0], db[0]
+            f.append(Levenshtein.distance(ha, hb))
+            f.append(float(ha != hb and (hb.startswith(ha) or ha.startswith(hb) or hb.endswith(ha) or ha.endswith(hb))))
+            f.append(math.log1p(abs(int(ha) - int(hb))))
+            ia, ib = [int(x) for x in da], [int(x) for x in db]
+            rng_b = len(ib) >= 2 and ib[0] < ib[1] <= ib[0] + 20 and ib[0] <= ia[0] <= ib[1]
+            rng_a = len(ia) >= 2 and ia[0] < ia[1] <= ia[0] + 20 and ia[0] <= ib[0] <= ia[1]
+            f.append(float(rng_a or rng_b))
+            f.append(float(any(Levenshtein.distance(x, y) <= 1 for x in da for y in db if len(x) >= 2 and len(y) >= 2)))
+        else:
+            f.extend([-1, -1, -1, -1, -1])
+        aa = " ".join(t for t in ta if not any(ch.isdigit() for ch in t))
+        ab = " ".join(t for t in tb if not any(ch.isdigit() for ch in t))
+        f.append(fuzz.token_set_ratio(aa, ab) if aa and ab else -1)
+        f.append(fuzz.token_sort_ratio(aa, ab) if aa and ab else -1)
+        f.append(float((not la) and bool(lb)))
+        f.append(float(bool(la) and not lb))
         out.append(f)
     return out
 
@@ -123,6 +144,8 @@ FEATURE_NAMES = [
     "ad_idf_cov_b", "ad_soft_ba", "num_n_a", "num_n_b", "num_shared", "num_jacc", "num_first_eq",
     "num_conflict", "state_eq", "comp_overlap", "comp_shared", "ad_max_idf_shared",
     "all_tset",
+    "hn_lev", "hn_prefix", "hn_logdiff", "hn_in_range", "num_any_lev1",
+    "ad_alpha_tset", "ad_alpha_tsort", "lg_add", "lg_drop",
 ]
 
 
