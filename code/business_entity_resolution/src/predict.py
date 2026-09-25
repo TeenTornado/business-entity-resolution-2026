@@ -48,21 +48,30 @@ def main():
         P1, P23 = load(a.work, a.split)
         blocking.run(P1, P23, cap=a.cap, k=a.k, log=log).to_parquet(cand_path)
         del P1, P23
-    # competition features over the whole retrieval graph first (narrow columns only)
+    # Retrieval never crosses country labels, so every competition feature (all S1s that
+    # retrieved a record) lives inside one country: process country by country to bound memory.
+    raw = pd.read_parquet(cand_path)
     ids23 = read_p23(a.work, a.split, ["entity_id"]).entity_id
-    cand = prepare_candidates(pd.read_parquet(cand_path), ids23)
-    del ids23
     P1, P23 = load(a.work, a.split)
-    log(f"retrieval candidates: {len(cand)} ({len(cand) / len(P1):.1f} per S1)")
-    # candidate pruner: cheap features only; its survivors ARE the candidate set fed to the matcher
+    log(f"retrieval candidates: {len(raw)} ({len(raw) / len(P1):.1f} per S1)")
     pr = lgb.Booster(model_file=f"{a.model_dir}/lgb_pruner.txt")
     spill = f"{a.work}/{a.split}_candfeat_spill"
-    os.makedirs(spill, exist_ok=True)
-    add_candidate_features(cand, P1, P23, cfg.get("offsets", []), pruner=pr, prune_thr=cfg["prune_thr"],
-                           pruner_cols=cfg["pruner_cols"], log=log, spill=spill)
-    del cand
+    parts = []
+    ctry = P1.country.values[raw.i1.values]
+    for country in pd.unique(ctry):
+        m = ctry == country
+        cand = prepare_candidates(raw[m].reset_index(drop=True), ids23)
+        sp = f"{spill}_{len(parts)}"
+        os.makedirs(sp, exist_ok=True)
+        add_candidate_features(cand, P1, P23, cfg.get("offsets", []), pruner=pr, prune_thr=cfg["prune_thr"],
+                               pruner_cols=cfg["pruner_cols"], log=log, spill=sp)
+        del cand
+        parts.append(sp)
+        log(f"  {country}: done")
+    del raw, ctry, ids23
     scoring._MEMO.clear()
-    cand = read_spill(spill)
+    cand = pd.concat([read_spill(sp) for sp in parts], ignore_index=True)
+    cand = cand.sort_values(["i1", "blk_score"], ascending=[True, False], kind="stable").reset_index(drop=True)
     log(f"pruned candidate set: {len(cand)} pairs ({len(cand) / len(P1):.2f} per S1)")
     write_lists(f"{a.out}/candidate_pairs.tsv", "candidate_entity_ids", P1.entity_id.values,
                 cand.i1.values, P23.entity_id.values[cand.i2.values])
