@@ -2,3 +2,7 @@
 **/.DS_Store
 *.zip
 *.tsv
+__pycache__/
+*.parquet
+work/
+output/*.tsv
