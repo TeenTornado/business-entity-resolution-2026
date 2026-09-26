@@ -40,6 +40,7 @@ def main():
     ap.add_argument("--cap", type=int, default=3000)
     ap.add_argument("--k", type=int, default=30)
     ap.add_argument("--block", type=int, default=150000, help="S1 rows scored per block")
+    ap.add_argument("--save-features", type=int, default=1, help="keep scored pair features (for self-training)")
     ap.add_argument("--country", default=None, help="internal: run the candidate stage for one country")
     a = ap.parse_args()
     t0 = time.time()
@@ -95,7 +96,11 @@ def main():
             continue
         c = cand.iloc[lo:hi]
         F = features.compute(c, P1, P23, tables)
-        p[lo:hi] = m1.predict(pd.concat([c, F], axis=1)[cfg["feat_cols"]], num_threads=4)
+        X = pd.concat([c, F], axis=1)
+        p[lo:hi] = m1.predict(X[cfg["feat_cols"]], num_threads=4)
+        if a.save_features:
+            os.makedirs(f"{a.work}/{a.split}_pairfeat", exist_ok=True)
+            X[["i1", "i2"] + cfg["feat_cols"]].to_parquet(f"{a.work}/{a.split}_pairfeat/block{lo:010d}.parquet")
         log(f"scored pairs {hi}/{len(cand)}")
     del tables
     np.save(f"{a.work}/{a.split}_scores.npy", p)

@@ -2,6 +2,7 @@
 for macro F0.5 on a held-out set of S1 entities."""
 import argparse
 import json
+import pickle
 import os
 import time
 
@@ -137,12 +138,20 @@ def main():
     ap.add_argument("--n-pruner", type=int, default=200000, help="train S1 entities used to fit the pruner")
     ap.add_argument("--n-val", type=int, default=150000)
     ap.add_argument("--rounds", type=int, default=3000)
+    ap.add_argument("--reuse-pairs", action="store_true", help="reuse cached pruned+featured training pairs")
+    ap.add_argument("--pseudo-dir", default=None, help="test pair features saved by predict.py")
+    ap.add_argument("--pseudo-scores", default=None, help="test scores (.npy) aligned with --pseudo-dir blocks")
+    ap.add_argument("--pseudo-weight", type=float, default=0.5)
+    ap.add_argument("--pseudo-max", type=int, default=4000000)
     ap.add_argument("--ablate-pool", action="store_true", help="also train a matcher without pool-statistic features")
     ap.add_argument("--prune-thr", type=float, default=0.01, help="pruner probability cut for the candidate set")
     a = ap.parse_args()
     t0 = time.time()
     log = lambda m: print(f"[{time.time() - t0:7.0f}s] {m}", flush=True)  # noqa: E731
 
+    cache = f"{a.work}/train_pairs_n{a.n_train}_p{a.prune_thr}.parquet"
+    if a.reuse_pairs and os.path.exists(cache):
+        return train_models(a, pd.read_parquet(cache), *pickle.load(open(cache + ".meta", "rb")), log)
     ids = read_p1(a.work, "train", ["entity_id"]).entity_id
     ids23 = read_p23(a.work, "train", ["entity_id"]).entity_id
     gt = pd.read_parquet(f"{a.work}/train_gt.parquet")
@@ -200,6 +209,16 @@ def main():
     cand = pd.concat([cand, F.set_index(cand.index)], axis=1)
     del F
     log(f"pairwise features: {len(cand)} pairs")
+    meta = (truth_counts, tr_ids, va_a, va_b, offsets, pr.best_iteration)
+    cand.to_parquet(cache)
+    pickle.dump(meta, open(cache + ".meta", "wb"))
+    pr.save_model(cache + ".pruner.txt", num_iteration=pr.best_iteration)
+    return train_models(a, cand, *meta, log)
+
+
+def train_models(a, cand, truth_counts, tr_ids, va_a, va_b, offsets, _pr_iter, log):
+    pcols = PRUNER_FEATURES
+    pr_path = f"{a.work}/train_pairs_n{a.n_train}_p{a.prune_thr}.parquet.pruner.txt"
     tr = cand[cand.i1.isin(tr_ids)]
     vA = cand[cand.i1.isin(va_a)].reset_index(drop=True)
     vB = cand[cand.i1.isin(va_b)].reset_index(drop=True)
@@ -209,8 +228,36 @@ def main():
     variants = {"full": MATCHER_FEATURES}
     if a.ablate_pool:
         variants["no_pool_stats"] = [c for c in MATCHER_FEATURES if c not in scoring.POOL_COLS]
+    pseudo = None
+    if a.pseudo_dir:
+        # transductive self-training: confident test predictions of a previous model become
+        # extra (down-weighted) training rows, adapting the matcher to test-only patterns
+        # (e.g. France). No test labels are used; selection/threshold still come from val.
+        import glob
+        blocks = sorted(glob.glob(f"{a.pseudo_dir}/block*.parquet"))
+        sc = np.load(a.pseudo_scores)
+        parts, off = [], 0
+        for b in blocks:
+            x = pd.read_parquet(b)
+            ps = sc[off:off + len(x)]
+            off += len(x)
+            conf = (ps >= 0.98) | (ps <= 0.02)
+            x = x[conf].copy()
+            x["label"] = (ps[conf] >= 0.98).astype(np.int8)
+            parts.append(x)
+        pseudo = pd.concat(parts, ignore_index=True)
+        if len(pseudo) > a.pseudo_max:
+            pseudo = pseudo.sample(a.pseudo_max, random_state=0)
+        log(f"pseudo-labelled test pairs: {len(pseudo)} (positives {pseudo.label.mean():.3f})")
     for name, cols in variants.items():
-        m = lgb.train(PARAMS, lgb.Dataset(tr[cols], tr.label), num_boost_round=a.rounds,
+        if pseudo is not None:
+            X = pd.concat([tr[cols], pseudo[cols]], ignore_index=True)
+            y = np.concatenate([tr.label.values, pseudo.label.values])
+            w = np.concatenate([np.ones(len(tr)), np.full(len(pseudo), a.pseudo_weight)])
+            dtrain = lgb.Dataset(X, y, weight=w)
+        else:
+            dtrain = lgb.Dataset(tr[cols], tr.label)
+        m = lgb.train(PARAMS, dtrain, num_boost_round=a.rounds,
                       valid_sets=[lgb.Dataset(vA[cols], vA.label)],
                       callbacks=[lgb.early_stopping(50), lgb.log_evaluation(200)])
         pA = m.predict(vA[cols], num_iteration=m.best_iteration)
@@ -229,7 +276,8 @@ def main():
     log(f"selected on half A: {best_key} -> reported half B F0.5 = {best['fB']:.5f}")
 
     os.makedirs(a.model_dir, exist_ok=True)
-    pr.save_model(f"{a.model_dir}/lgb_pruner.txt", num_iteration=pr.best_iteration)
+    import shutil
+    shutil.copy(pr_path, f"{a.model_dir}/lgb_pruner.txt")
     best["model"].save_model(f"{a.model_dir}/lgb_stage1.txt", num_iteration=best["model"].best_iteration)
     json.dump({"thr": best["thr"], "rel": 0.0, "prune_thr": a.prune_thr, "offsets": offsets,
                "sibling_veto": bool(best_key[1]), "variant": best_key[0], "val_f05": best["fB"],
