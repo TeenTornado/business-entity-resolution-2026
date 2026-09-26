@@ -143,7 +143,7 @@ def main():
     ap.add_argument("--pseudo-dir", default=None, help="test pair features saved by predict.py")
     ap.add_argument("--pseudo-scores", default=None, help="test scores (.npy) aligned with --pseudo-dir blocks")
     ap.add_argument("--pseudo-weight", type=float, default=0.5)
-    ap.add_argument("--pseudo-max", type=int, default=4000000)
+    ap.add_argument("--pseudo-max", type=int, default=2000000)
     ap.add_argument("--ablate-pool", action="store_true", help="also train a matcher without pool-statistic features")
     ap.add_argument("--prune-thr", type=float, default=0.01, help="pruner probability cut for the candidate set")
     a = ap.parse_args()
@@ -247,25 +247,30 @@ def train_models(a, cand, truth_counts, tr_ids, va_a, va_b, offsets, _pr_iter, l
         import glob
         blocks = sorted(glob.glob(f"{a.pseudo_dir}/block*.parquet"))
         sc = np.load(a.pseudo_scores)
+        conf_all = (sc >= 0.98) | (sc <= 0.02)
+        frac = min(1.0, a.pseudo_max / max(1, conf_all.sum()))
+        rng = np.random.RandomState(0)
         parts, off = [], 0
         for b in blocks:
             x = pd.read_parquet(b)
             ps = sc[off:off + len(x)]
             off += len(x)
-            conf = (ps >= 0.98) | (ps <= 0.02)
-            x = x[conf].copy()
-            x["label"] = (ps[conf] >= 0.98).astype(np.int8)
+            take = ((ps >= 0.98) | (ps <= 0.02)) & (rng.rand(len(x)) < frac)
+            x = x[take]
+            x = x.astype({c: np.float32 for c in x.columns if x[c].dtype == np.float64})
+            x["label"] = (ps[take] >= 0.98).astype(np.int8)
             parts.append(x)
+            del x
         pseudo = pd.concat(parts, ignore_index=True)
-        if len(pseudo) > a.pseudo_max:
-            pseudo = pseudo.sample(a.pseudo_max, random_state=0)
+        del parts
         log(f"pseudo-labelled test pairs: {len(pseudo)} (positives {pseudo.label.mean():.3f})")
     for name, cols in variants.items():
         if pseudo is not None:
-            X = pd.concat([tr[cols], pseudo[cols]], ignore_index=True)
+            X = np.vstack([tr[cols].to_numpy(np.float32), pseudo[cols].to_numpy(np.float32)])
             y = np.concatenate([tr.label.values, pseudo.label.values])
             w = np.concatenate([np.ones(len(tr)), np.full(len(pseudo), a.pseudo_weight)])
-            dtrain = lgb.Dataset(X, y, weight=w)
+            dtrain = lgb.Dataset(X, y, weight=w, feature_name=cols, free_raw_data=True)
+            del X
         else:
             dtrain = lgb.Dataset(tr[cols], tr.label)
         m = lgb.train(PARAMS, dtrain, num_boost_round=a.rounds,
