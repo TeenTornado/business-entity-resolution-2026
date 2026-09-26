@@ -20,7 +20,7 @@ if [ ! -d .venv_ce ]; then python3 -m venv .venv_ce; fi
 source .venv_ce/bin/activate
 pip install -q --upgrade pip
 pip install -q torch transformers sentencepiece pandas pyarrow numpy
-python3 -c "import torch; assert torch.backends.mps.is_available(), 'MPS not available'; print('torch', torch.__version__, 'MPS ok')"
+python3 -c "import torch, os; assert torch.backends.mps.is_available(), 'MPS not available'; print('torch', torch.__version__, 'MPS ok', flush=True); os._exit(0)"
 
 echo "== 2. data"
 cd "$DATA"
@@ -31,21 +31,22 @@ cd "$ROOT"
 python3 -c "
 import pandas as pd
 for f in ['ce_train','ce_val','ce_test']:
-    d=pd.read_parquet('$DATA/'+f+'.parquet'); print(f, len(d), list(d.columns))
+    d=pd.read_parquet('$DATA/'+f+'.parquet'); print(f, len(d), list(d.columns), flush=True)
+import os; os._exit(0)
 "
 
-echo "== 3. model download (once)"
-python3 -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification as M; AutoTokenizer.from_pretrained('$BASE'); M.from_pretrained('$BASE', num_labels=1); print('model ready: $BASE')"
+echo "== 3. model download (once)"; date
+python3 -c "from transformers import AutoTokenizer, AutoModelForSequenceClassification as M; AutoTokenizer.from_pretrained('$BASE'); M.from_pretrained('$BASE', num_labels=1); print('model ready: $BASE', flush=True); import os; os._exit(0)"
 
-echo "== 4. train (resumable; keep the lid open / mac awake)"
+echo "== 4. train (resumable; keep the lid open / mac awake)"; date
 if [ ! -f "$MODEL/final/config.json" ]; then
-  caffeinate -dimsu python3 code/business_entity_resolution/src/ce.py train --data "$DATA" --out "$MODEL" \
+  caffeinate -dimsu python3 -u code/business_entity_resolution/src/ce.py train --data "$DATA" --out "$MODEL" \
       --base "$BASE" --max-pairs "$MAXPAIRS" --epochs 1 --bs 16 --lr 2e-5 --max-len 96 --ckpt-every 2000 \
       2>&1 | tee -a "$RES/train.log"
 fi
 
 echo "== 5. score uncertain validation + test pairs"
-caffeinate -dimsu python3 code/business_entity_resolution/src/ce.py score --data "$DATA" --model "$MODEL" \
+caffeinate -dimsu python3 -u code/business_entity_resolution/src/ce.py score --data "$DATA" --model "$MODEL" \
     --base "$BASE" --bs 16 --max-len 96 2>&1 | tee -a "$RES/score.log"
 cp "$DATA/val_ce.npy" "$DATA/test_ce.npy" "$RES/"
 ls -la "$RES"
