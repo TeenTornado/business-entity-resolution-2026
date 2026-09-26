@@ -14,7 +14,7 @@ to the competition portal.
 **Expected time:**
 - about 10 min setup;
 - **training 4–8 h** (progress lines show `pairs/s` and `eta ... h`);
-- scoring about 30–45 min.
+- scoring about 1–1.5 h (805k test + 35k validation pairs).
 
 ---
 
