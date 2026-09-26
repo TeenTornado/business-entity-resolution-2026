@@ -94,3 +94,17 @@ differing by exactly 1 token on each side (not a typo: ratio < 60).
 - c1 keeps all features; "restoring features" (option C) = c1 itself.
 - Self-training on test pseudo-labels is the one lever with public evidence (+0.0006 on
   v6). c1 does not use it yet → experiment E1.
+
+## Web research (public repos for this challenge, 2026-09-26)
+- No public write-up reports ≥ 0.98. Public scores found: Akash-bardia 0.9761;
+  mayankgoplani431-del 0.964 (their best).
+- mayankgoplani431-del lessons (validation → leaderboard):
+  - A name-as-one-token TF-IDF pass + exact keys (name+house no., unique names,
+    sorted-name+no.) raised blocking recall from 95.4 to 97.5 % → +0.011 public.
+  - Density-sensitive group features: validation +0.003, **public −0.008**. They accepted
+    about 230k extra test pairs, 60–90 % with a different house number (siblings). Test has
+    5.8 pool records/S1 vs 4.67 in train. Same lesson as our c3 check.
+- gojosatorou999: 4 retrieval channels with reciprocal-rank fusion; an expected-F0.5 prefix
+  decision per entity vs the empty set; leave-one-country-out validation as a proxy for France.
+- A community idea: a LoRA-fine-tuned ≤8B LLM (Qwen2.5-7B, Apache-2.0) as a re-ranker on
+  borderline pairs. Needs a GPU; not feasible on our budget.
