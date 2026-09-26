@@ -308,11 +308,18 @@ def cmd_train(a):
         dtrain = lgb.Dataset(pd.concat([cand.loc[is_tr, s2cols], Xp], ignore_index=True), np.r_[ytr, yp],
                              weight=np.r_[np.ones(len(ytr)), np.full(len(yp), a.pseudo_weight)])
         del Xp
-    m2 = lgb.train(params, dtrain,
+    if a.reuse_stage2 and os.path.exists(f"{a.out_dir}/stage2.txt"):
+        m2 = lgb.Booster(model_file=f"{a.out_dir}/stage2.txt")
+        m2.best_iteration = 0
+    else:
+      m2 = lgb.train(params, dtrain,
                    num_boost_round=a.rounds, valid_sets=[lgb.Dataset(vA[s2cols], vA.label)],
                    callbacks=[lgb.early_stopping(50), lgb.log_evaluation(200)])
     pA = m2.predict(vA[s2cols], num_iteration=m2.best_iteration)
     pB = m2.predict(vB[s2cols], num_iteration=m2.best_iteration)
+    pd.DataFrame({"i1": np.r_[vA.i1.values, vB.i1.values], "i2": np.r_[vA.i2.values, vB.i2.values],
+                  "label": np.r_[vA.label.values, vB.label.values], "half": np.r_[np.zeros(len(vA)), np.ones(len(vB))].astype(np.int8),
+                  "p2": np.r_[pA, pB].astype(np.float32)}).to_parquet(f"{a.out_dir}/val_pairs.parquet")
     (fA, (thr, _)), grid = tune(vA, pA, va_a, truth_counts)
     kB = scoring.decide(vB, pB, thr)
     fB, detail = scoring.macro_f05(va_b, vB, kB, truth_counts)
@@ -395,6 +402,7 @@ def main():
     ap.add_argument("--pseudo-scores", default="", help="previous stage-2 test scores aligned with --pseudo-feat")
     ap.add_argument("--pseudo-weight", type=float, default=0.5)
     ap.add_argument("--pseudo-max", type=int, default=3000000)
+    ap.add_argument("--reuse-stage2", action="store_true", help="load an existing stage2.txt instead of training")
     ap.add_argument("--passes", type=int, default=1, help="collective passes before the final model")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-s1", type=int, default=0, help="train on a subset of training S1s (0 = all)")
