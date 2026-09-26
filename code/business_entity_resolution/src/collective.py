@@ -216,6 +216,7 @@ def cmd_train(a):
     f_of = fold[cand.i1.values]
     p1 = np.zeros(len(cand), np.float32)
     dva = lgb.Dataset(cand.loc[is_a, cols], cand.label.values[is_a], free_raw_data=False)
+    folds1 = []
     for k in (0, 1):
         path = f"{a.out_dir}/stage1_fold{k}.txt"
         fit = is_tr & (f_of == bool(k))
@@ -226,6 +227,7 @@ def cmd_train(a):
                           num_boost_round=a.rounds, valid_sets=[dva],
                           callbacks=[lgb.early_stopping(50), lgb.log_evaluation(200)])
             m.save_model(path, num_iteration=m.best_iteration)
+        folds1.append(m)
         oof = is_tr & (f_of != bool(k))
         p1[oof] = m.predict(cand.loc[oof, cols], num_threads=a.workers)
         val = is_a | is_b
@@ -276,7 +278,37 @@ def cmd_train(a):
     vA = cand[is_a].reset_index(drop=True)
     vB = cand[is_b].reset_index(drop=True)
     params = dict(PARAMS, num_threads=a.workers, learning_rate=0.05)
-    m2 = lgb.train(params, lgb.Dataset(cand.loc[is_tr, s2cols], cand.label.values[is_tr]),
+    dtrain = lgb.Dataset(cand.loc[is_tr, s2cols], cand.label.values[is_tr])
+    if a.pseudo_feat:
+        # transductive self-training: confident test decisions of a previous stage-2 model
+        # become extra, down-weighted rows (the test pool, France included, has its own
+        # distractor mix). Early stopping, threshold and the reported score stay on val.
+        assert a.passes == 1, "self-training supports --passes 1 only"
+        blocks = sorted(glob.glob(f"{a.pseudo_feat}/block*.parquet"))
+        sc = np.load(a.pseudo_scores)
+        conf = (sc >= 0.98) | (sc <= 0.02)
+        take = conf & (np.random.RandomState(0).rand(len(sc)) < min(1.0, a.pseudo_max / max(1, conf.sum())))
+        tp = np.zeros(len(sc), np.float32)
+        ids, parts, off = [], [], 0
+        for b in blocks:
+            x = pd.read_parquet(b, columns=["i1", "i2"] + cols)
+            n = len(x)
+            tp[off:off + n] = np.mean([m.predict(x[cols], num_threads=a.workers) for m in folds1], axis=0)
+            ids.append(x[["i1", "i2"]])
+            parts.append(x.loc[take[off:off + n], cols].astype(np.float32))
+            off += n
+        assert off == len(sc), "pseudo scores do not align with --pseudo-feat blocks"
+        ids = pd.concat(ids, ignore_index=True)
+        Ft = collective_features(ids.i1.values, ids.i2.values, tp, a.work, "test", a.anchor_thr, a.workers)
+        Xp = pd.concat([pd.concat(parts, ignore_index=True), Ft[take].reset_index(drop=True)], axis=1)[s2cols]
+        yp = (sc[take] >= 0.98).astype(np.int8)
+        del Ft, parts, ids
+        log(f"pseudo-labelled test pairs: {len(yp)} (positives {yp.mean():.3f}), weight {a.pseudo_weight}")
+        ytr = cand.label.values[is_tr]
+        dtrain = lgb.Dataset(pd.concat([cand.loc[is_tr, s2cols], Xp], ignore_index=True), np.r_[ytr, yp],
+                             weight=np.r_[np.ones(len(ytr)), np.full(len(yp), a.pseudo_weight)])
+        del Xp
+    m2 = lgb.train(params, dtrain,
                    num_boost_round=a.rounds, valid_sets=[lgb.Dataset(vA[s2cols], vA.label)],
                    callbacks=[lgb.early_stopping(50), lgb.log_evaluation(200)])
     pA = m2.predict(vA[s2cols], num_iteration=m2.best_iteration)
@@ -359,6 +391,10 @@ def main():
     ap.add_argument("--anchor-thr", type=float, default=0.5)
     ap.add_argument("--drop-cols", default="", help="comma list of stage-1 features to exclude")
     ap.add_argument("--drop-prefix", default="", help="comma list of feature-name prefixes to exclude")
+    ap.add_argument("--pseudo-feat", default="", help="test pair features (block*.parquet) for self-training")
+    ap.add_argument("--pseudo-scores", default="", help="previous stage-2 test scores aligned with --pseudo-feat")
+    ap.add_argument("--pseudo-weight", type=float, default=0.5)
+    ap.add_argument("--pseudo-max", type=int, default=3000000)
     ap.add_argument("--passes", type=int, default=1, help="collective passes before the final model")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-s1", type=int, default=0, help="train on a subset of training S1s (0 = all)")
