@@ -1,0 +1,3 @@
+ce_model/
+ce_data/*.parquet
+ce_data/*.npy
