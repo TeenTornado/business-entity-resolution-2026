@@ -122,3 +122,9 @@ differing by exactly 1 token on each side (not a typo: ratio < 60).
   mac_ce/RUNBOOK.md. Data: 600k hard train pairs, 35k uncertain val pairs and 805k
   uncertain test pairs (c1 p in 0.05–0.95). The blend (ce_blend.py) is fitted on val
   half A and reported on half B.
+- E1 (c5) = c1 + stage-2 self-training (1.5M confident test pairs, weight 0.5):
+  - val half A 0.98765 (c1 0.98777), half B 0.98778 (c1 0.98769), FP pairs 459 vs 471;
+  - test changes tiny (France +1.7k pairs) → neutral; not worth an upload.
+- France region-vs-département check (same name + same house number pairs):
+  - acceptance 95.6 % when the record ends in a département/city, 93.6 % when it ends in the
+    region → **no penalty from département wording; hypothesis rejected**.
