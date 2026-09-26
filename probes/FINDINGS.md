@@ -108,3 +108,17 @@ differing by exactly 1 token on each side (not a typo: ratio < 60).
   decision per entity vs the empty set; leave-one-country-out validation as a proxy for France.
 - A community idea: a LoRA-fine-tuned ≤8B LLM (Qwen2.5-7B, Apache-2.0) as a re-ranker on
   borderline pairs. Needs a GPU; not feasible on our budget.
+
+## More results (2026-09-26 evening)
+- c4 (MacBook Pro; 22 pool features dropped): val 0.98614 vs c1 0.98714 on the same
+  machine; +60k test pairs accepted → same pattern as c3 → not uploaded.
+- US/India test acceptance per S1 matches the val true-copy counts in every house-number
+  category (same no., missing, digit edit, other, ±K offset) → no systematic US/India
+  error visible. France is the likely gap (c1 accepts 3.18/S1 vs about 3.4 expected).
+- Test has 2–3× more ±K sibling pairs than val (US 0.70, France 1.00, India 0.40 per S1
+  vs 0.30); c1 accepts only 0.02–0.03/S1 of them, which matches the val true rate.
+- Top-50 teams score 0.987–0.989 public, equal to our val → they have no val→test gap.
+- Cross-encoder plan: multilingual-e5-large (MIT, 560 M) on the MacBook Pro;
+  mac_ce/RUNBOOK.md. Data: 600k hard train pairs, 35k uncertain val pairs and 805k
+  uncertain test pairs (c1 p in 0.05–0.95). The blend (ce_blend.py) is fitted on val
+  half A and reported on half B.
