@@ -135,6 +135,7 @@ def main():
     ap.add_argument("--work", required=True)
     ap.add_argument("--model-dir", required=True)
     ap.add_argument("--n-train", type=int, default=400000)
+    ap.add_argument("--feat-batch", type=int, default=300000, help="S1 entities per candidate-feature batch")
     ap.add_argument("--n-pruner", type=int, default=200000, help="train S1 entities used to fit the pruner")
     ap.add_argument("--n-val", type=int, default=150000)
     ap.add_argument("--rounds", type=int, default=3000)
@@ -168,13 +169,23 @@ def main():
     P1, P23 = load(a.work, "train")
     sib_path = f"{a.work}/siblings.json"
     offsets = json.load(open(sib_path))["offsets"] if os.path.exists(sib_path) else []
+    import gc
+    import shutil
     spill = f"{a.work}/train_candfeat_spill"
-    os.makedirs(spill, exist_ok=True)
-    add_candidate_features(cand, P1, P23, offsets, log=log, spill=spill)
+    all_ids = np.unique(cand.i1.values)
+    batches = np.array_split(all_ids, max(1, int(np.ceil(len(all_ids) / a.feat_batch))))
+    for bi, ids_b in enumerate(batches):
+        sp = f"{spill}/b{bi:03d}"
+        os.makedirs(sp, exist_ok=True)
+        cb = cand[cand.i1.isin(ids_b)].reset_index(drop=True)
+        add_candidate_features(cb, P1, P23, offsets, log=log, spill=sp)
+        del cb
+        gc.collect()
+        log(f"candidate feature batch {bi + 1}/{len(batches)} done")
     del cand
     scoring._MEMO.clear()
-    cand = read_spill(spill)
-    import shutil
+    gc.collect()
+    cand = pd.concat([read_spill(f"{spill}/b{bi:03d}") for bi in range(len(batches))], ignore_index=True)
     shutil.rmtree(spill)
     log("candidate-level features done")
 
