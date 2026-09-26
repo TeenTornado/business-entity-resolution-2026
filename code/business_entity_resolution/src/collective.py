@@ -228,17 +228,49 @@ def cmd_train(a):
         p1[val] += 0.5 * m.predict(cand.loc[val, cols], num_threads=a.workers)
         log(f"stage-1 fold {k} done")
     del dva
-    F = collective_features(cand.i1.values, cand.i2.values, p1, a.work, "train", a.anchor_thr, a.workers)
-    log("collective features done")
-    cand = pd.concat([cand, F], axis=1)
-    del F
     s2cols = cols + COLL_COLS
+    val = is_a | is_b
+    cA, cB = cand.loc[is_a, ["i1", "i2", "label"]], cand.loc[is_b, ["i1", "i2", "label"]]
+    # stage-1 baseline on the same folds (fold-mean scores), for an apples-to-apples comparison
+    (fA1, (thr1, _)), _ = tune(cA, p1[is_a], va_a, truth_counts)
+    k1 = scoring.decide(cB, p1[is_b], thr1)
+    fB1, _ = scoring.macro_f05(va_b, cB, k1, truth_counts)
+    log(f"VALIDATION stage-1 (fold mean) thr {thr1:.4f} -> half B macro F0.5 = {fB1:.5f}")
+    params = dict(PARAMS, num_threads=a.workers, learning_rate=0.05)
+    p = p1
+
+    def put(F):
+        for c in F.columns:
+            cand[c] = F[c].values
+
+    # extra collective passes: anchors/competitors are re-derived from the previous pass's
+    # (out-of-fold) scores, so each pass sees cleaner groups
+    for k in range(2, a.passes + 1):
+        put(collective_features(cand.i1.values, cand.i2.values, p, a.work, "train", a.anchor_thr, a.workers))
+        pk = np.zeros(len(cand), np.float32)
+        dva = lgb.Dataset(cand.loc[is_a, s2cols], cand.label.values[is_a], free_raw_data=False)
+        for f in (0, 1):
+            path = f"{a.out_dir}/stage{k}_fold{f}.txt"
+            fit = is_tr & (f_of == bool(f))
+            if os.path.exists(path):
+                m = lgb.Booster(model_file=path)
+            else:
+                m = lgb.train(params, lgb.Dataset(cand.loc[fit, s2cols], cand.label.values[fit]),
+                              num_boost_round=a.rounds, valid_sets=[dva],
+                              callbacks=[lgb.early_stopping(50), lgb.log_evaluation(200)])
+                m.save_model(path, num_iteration=m.best_iteration)
+            oof = is_tr & (f_of != bool(f))
+            pk[oof] = m.predict(cand.loc[oof, s2cols], num_threads=a.workers)
+            pk[val] += 0.5 * m.predict(cand.loc[val, s2cols], num_threads=a.workers)
+        del dva
+        p = pk
+        (fAk, (thrk, _)), _ = tune(cA, p[is_a], va_a, truth_counts)
+        fBk, _ = scoring.macro_f05(va_b, cB, scoring.decide(cB, p[is_b], thrk), truth_counts)
+        log(f"VALIDATION pass {k} (fold mean) thr {thrk:.4f} -> half B macro F0.5 = {fBk:.5f}")
+    put(collective_features(cand.i1.values, cand.i2.values, p, a.work, "train", a.anchor_thr, a.workers))
+    log("collective features done")
     vA = cand[is_a].reset_index(drop=True)
     vB = cand[is_b].reset_index(drop=True)
-    # stage-1 baseline on the same folds (fold-mean scores), for an apples-to-apples comparison
-    (fA1, (thr1, _)), _ = tune(vA, vA.c_p1.values, va_a, truth_counts)
-    fB1, _ = scoring.macro_f05(va_b, vB, scoring.decide(vB, vB.c_p1.values, thr1), truth_counts)
-    log(f"VALIDATION stage-1 (fold mean) thr {thr1:.4f} -> half B macro F0.5 = {fB1:.5f}")
     params = dict(PARAMS, num_threads=a.workers, learning_rate=0.05)
     m2 = lgb.train(params, lgb.Dataset(cand.loc[is_tr, s2cols], cand.label.values[is_tr]),
                    num_boost_round=a.rounds, valid_sets=[lgb.Dataset(vA[s2cols], vA.label)],
@@ -251,13 +283,12 @@ def cmd_train(a):
     log(f"VALIDATION stage-2 collective thr {thr:.4f} (half A F={fA:.5f}) -> half B macro F0.5 = {fB:.5f}")
     emp = vB.c_emp.values == 1
     y = vB.label.values == 1
-    k1 = scoring.decide(vB, vB.c_p1.values, thr1)
     for nm, msk in (("empty-addr", emp), ("has-addr", ~emp)):
         log(f"  {nm}: recall stage1 {k1[y & msk].mean():.4f} -> stage2 {kB[y & msk].mean():.4f} | "
             f"false pairs stage1 {int((k1 & ~y & msk).sum())} -> stage2 {int((kB & ~y & msk).sum())}")
     m2.save_model(f"{a.out_dir}/stage2.txt", num_iteration=m2.best_iteration)
     json.dump({"thr": thr, "anchor_thr": a.anchor_thr, "feat_cols": cols, "s2_cols": s2cols, "val_f05": fB,
-               "val_f05_stage1": fB1, "grid_half_a": grid}, open(f"{a.out_dir}/decision.json", "w"), indent=1)
+               "val_f05_stage1": fB1, "passes": a.passes, "grid_half_a": grid}, open(f"{a.out_dir}/decision.json", "w"), indent=1)
     detail.to_parquet(f"{a.out_dir}/val_detail.parquet")
     imp = pd.Series(m2.feature_importance("gain"), index=s2cols).sort_values(ascending=False)
     print(imp.head(25).to_string())
@@ -275,16 +306,24 @@ def cmd_predict(a):
         parts.append(pd.DataFrame({"i1": x.i1.values, "i2": x.i2.values, "p1": p}))
     base = pd.concat(parts, ignore_index=True)
     log(f"test pairs {len(base)}")
-    F = collective_features(base.i1.values, base.i2.values, base.p1.values, a.work, a.split, cfg["anchor_thr"],
-                            a.workers)
-    m2 = lgb.Booster(model_file=f"{a.out_dir}/stage2.txt")
-    p2 = np.zeros(len(base), np.float32)
-    off = 0
-    for b in blocks:
-        x = pd.read_parquet(b, columns=cols)
-        X = pd.concat([x.reset_index(drop=True), F.iloc[off:off + len(x)].reset_index(drop=True)], axis=1)
-        p2[off:off + len(x)] = m2.predict(X[s2cols], num_threads=a.workers)
-        off += len(x)
+    p = base.p1.values
+
+    def blockwise(models, F):
+        out = np.zeros(len(base), np.float32)
+        off = 0
+        for b in blocks:
+            x = pd.read_parquet(b, columns=cols)
+            X = pd.concat([x.reset_index(drop=True), F.iloc[off:off + len(x)].reset_index(drop=True)], axis=1)
+            out[off:off + len(x)] = np.mean([m.predict(X[s2cols], num_threads=a.workers) for m in models], axis=0)
+            off += len(x)
+        return out
+
+    for k in range(2, cfg.get("passes", 1) + 1):
+        F = collective_features(base.i1.values, base.i2.values, p, a.work, a.split, cfg["anchor_thr"], a.workers)
+        p = blockwise([lgb.Booster(model_file=f"{a.out_dir}/stage{k}_fold{f}.txt") for f in (0, 1)], F)
+        log(f"pass {k} done")
+    F = collective_features(base.i1.values, base.i2.values, p, a.work, a.split, cfg["anchor_thr"], a.workers)
+    p2 = blockwise([lgb.Booster(model_file=f"{a.out_dir}/stage2.txt")], F)
     np.save(f"{a.out_dir}/test_scores_stage2.npy", p2)
     keep = scoring.decide(base, p2, cfg["thr"], one_owner=True)
     k1 = scoring.decide(base, base.p1.values, cfg["thr"], one_owner=True)
@@ -314,6 +353,7 @@ def main():
     ap.add_argument("--prune-thr", type=float, default=0.004)
     ap.add_argument("--rounds", type=int, default=3000)
     ap.add_argument("--anchor-thr", type=float, default=0.5)
+    ap.add_argument("--passes", type=int, default=1, help="collective passes before the final model")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-s1", type=int, default=0, help="train on a subset of training S1s (0 = all)")
     ap.add_argument("--split", default="test")
