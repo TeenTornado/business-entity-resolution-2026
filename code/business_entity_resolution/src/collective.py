@@ -176,7 +176,11 @@ def collective_features(i1, i2, p1, work, split, anchor_thr=0.5, workers=4, chun
 
 def cmd_train(a):
     cfg = json.load(open(f"{a.model_dir}/decision.json"))
-    cols = cfg["feat_cols"]
+    drop = set(a.drop_cols.split(",")) if a.drop_cols else set()
+    for pre in (a.drop_prefix.split(",") if a.drop_prefix else []):
+        drop |= {c for c in cfg["feat_cols"] if c.startswith(pre)}
+    cols = [c for c in cfg["feat_cols"] if c not in drop]
+    log(f"stage-1 features: {len(cols)} (dropped {len(cfg['feat_cols']) - len(cols)}: {sorted(drop)})")
     cache = f"{a.work}/train_pairs_n{a.n_train}_p{a.prune_thr}.parquet"
     truth_counts, tr_ids, va_a, va_b = pickle.load(open(cache + ".meta", "rb"))[:4]
     os.makedirs(a.out_dir, exist_ok=True)
@@ -353,6 +357,8 @@ def main():
     ap.add_argument("--prune-thr", type=float, default=0.004)
     ap.add_argument("--rounds", type=int, default=3000)
     ap.add_argument("--anchor-thr", type=float, default=0.5)
+    ap.add_argument("--drop-cols", default="", help="comma list of stage-1 features to exclude")
+    ap.add_argument("--drop-prefix", default="", help="comma list of feature-name prefixes to exclude")
     ap.add_argument("--passes", type=int, default=1, help="collective passes before the final model")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--max-s1", type=int, default=0, help="train on a subset of training S1s (0 = all)")
