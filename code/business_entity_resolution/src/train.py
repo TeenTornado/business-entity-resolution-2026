@@ -307,4 +307,6 @@ def train_models(a, cand, truth_counts, tr_ids, va_a, va_b, offsets, _pr_iter, l
 
 
 if __name__ == "__main__":
+    import multiprocessing as _mp
+    _mp.set_start_method("fork", force=True)  # macOS defaults to spawn; workers rely on fork-inherited globals
     main()
