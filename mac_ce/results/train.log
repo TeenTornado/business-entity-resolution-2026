@@ -1,0 +1,209 @@
+train pairs 600000 positives 0.255 device mps model intfloat/multilingual-e5-large
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/389 [00:00<?, ?it/s]Loading weights: 100%|██████████| 389/389 [00:00<00:00, 24040.55it/s]
+[transformers] [1mXLMRobertaForSequenceClassification LOAD REPORT[0m from: intfloat/multilingual-e5-large
+Key                        | Status     | 
+---------------------------+------------+-
+pooler.dense.weight        | UNEXPECTED | 
+pooler.dense.bias          | UNEXPECTED | 
+classifier.dense.weight    | MISSING    | 
+classifier.dense.bias      | MISSING    | 
+classifier.out_proj.bias   | MISSING    | 
+classifier.out_proj.weight | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+train pairs 600000 positives 0.255 device mps model intfloat/multilingual-e5-large
+Loading weights:   0%|          | 0/389 [00:00<?, ?it/s]Loading weights: 100%|██████████| 389/389 [00:00<00:00, 26179.49it/s]
+[transformers] [1mXLMRobertaForSequenceClassification LOAD REPORT[0m from: intfloat/multilingual-e5-large
+Key                        | Status     | 
+---------------------------+------------+-
+pooler.dense.bias          | UNEXPECTED | 
+pooler.dense.weight        | UNEXPECTED | 
+classifier.dense.weight    | MISSING    | 
+classifier.out_proj.bias   | MISSING    | 
+classifier.dense.bias      | MISSING    | 
+classifier.out_proj.weight | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+train pairs 600000 positives 0.255 device mps model intfloat/multilingual-e5-large
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/389 [00:00<?, ?it/s]Loading weights: 100%|██████████| 389/389 [00:00<00:00, 8816.28it/s]
+[transformers] [1mXLMRobertaForSequenceClassification LOAD REPORT[0m from: intfloat/multilingual-e5-large
+Key                        | Status     | 
+---------------------------+------------+-
+pooler.dense.bias          | UNEXPECTED | 
+pooler.dense.weight        | UNEXPECTED | 
+classifier.dense.bias      | MISSING    | 
+classifier.dense.weight    | MISSING    | 
+classifier.out_proj.weight | MISSING    | 
+classifier.out_proj.bias   | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+/opt/homebrew/Cellar/python@3.11/3.11.15_4/Frameworks/Python.framework/Versions/3.11/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+/opt/homebrew/Cellar/python@3.11/3.11.15_4/Frameworks/Python.framework/Versions/3.11/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+train pairs 600000 positives 0.255 device mps model intfloat/multilingual-e5-large
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/389 [00:00<?, ?it/s]Loading weights: 100%|██████████| 389/389 [00:00<00:00, 28392.17it/s]
+[transformers] [1mXLMRobertaForSequenceClassification LOAD REPORT[0m from: intfloat/multilingual-e5-large
+Key                        | Status     | 
+---------------------------+------------+-
+pooler.dense.bias          | UNEXPECTED | 
+pooler.dense.weight        | UNEXPECTED | 
+classifier.out_proj.weight | MISSING    | 
+classifier.out_proj.bias   | MISSING    | 
+classifier.dense.weight    | MISSING    | 
+classifier.dense.bias      | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+step 100/37500 loss 0.5167 3 pairs/s eta 63.40 h
+step 200/37500 loss 0.5961 2 pairs/s eta 80.42 h
+step 300/37500 loss 0.5255 1 pairs/s eta 124.49 h
+step 400/37500 loss 0.7037 1 pairs/s eta 155.95 h
+step 500/37500 loss 0.3573 1 pairs/s eta 175.97 h
+step 600/37500 loss 0.6842 1 pairs/s eta 183.29 h
+step 700/37500 loss 0.3990 1 pairs/s eta 187.36 h
+step 800/37500 loss 0.4952 1 pairs/s eta 186.84 h
+step 900/37500 loss 0.3787 1 pairs/s eta 186.58 h
+step 1000/37500 loss 0.3003 1 pairs/s eta 184.61 h
+step 1100/37500 loss 0.2195 1 pairs/s eta 185.64 h
+step 1200/37500 loss 0.4321 1 pairs/s eta 184.54 h
+step 1300/37500 loss 0.3338 1 pairs/s eta 184.56 h
+step 1400/37500 loss 0.2126 1 pairs/s eta 186.38 h
+step 1500/37500 loss 0.5996 1 pairs/s eta 187.05 h
+step 1600/37500 loss 0.1498 1 pairs/s eta 188.03 h
+step 1700/37500 loss 0.4272 1 pairs/s eta 188.44 h
+/opt/homebrew/Cellar/python@3.11/3.11.15_4/Frameworks/Python.framework/Versions/3.11/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+train pairs 300000 positives 0.254 device mps model intfloat/multilingual-e5-base
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/197 [00:00<?, ?it/s]Loading weights: 100%|██████████| 197/197 [00:00<00:00, 41517.33it/s]
+[transformers] [1mXLMRobertaForSequenceClassification LOAD REPORT[0m from: intfloat/multilingual-e5-base
+Key                        | Status     | 
+---------------------------+------------+-
+pooler.dense.weight        | UNEXPECTED | 
+pooler.dense.bias          | UNEXPECTED | 
+classifier.out_proj.bias   | MISSING    | 
+classifier.dense.bias      | MISSING    | 
+classifier.out_proj.weight | MISSING    | 
+classifier.dense.weight    | MISSING    | 
+
+Notes:
+- UNEXPECTED:	can be ignored when loading from different task/architecture; not ok if you expect identical arch.
+- MISSING:	those params were newly initialized because missing from the checkpoint. Consider training on your downstream task.
+trainable params 86M
+step 20/9375 loss 0.6237 76 pairs/s eta 1.09 h
+step 100/9375 loss 0.5719 82 pairs/s eta 1.00 h
+step 200/9375 loss 0.4616 83 pairs/s eta 0.98 h
+step 300/9375 loss 0.3998 83 pairs/s eta 0.97 h
+step 400/9375 loss 0.4322 83 pairs/s eta 0.96 h
+step 500/9375 loss 0.4141 83 pairs/s eta 0.95 h
+step 600/9375 loss 0.2493 83 pairs/s eta 0.94 h
+step 700/9375 loss 0.2808 83 pairs/s eta 0.93 h
+step 800/9375 loss 0.3678 83 pairs/s eta 0.92 h
+step 900/9375 loss 0.2796 83 pairs/s eta 0.91 h
+step 1000/9375 loss 0.1639 83 pairs/s eta 0.90 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_1000
+step 1100/9375 loss 0.2847 83 pairs/s eta 0.89 h
+step 1200/9375 loss 0.3399 83 pairs/s eta 0.88 h
+step 1300/9375 loss 0.2599 83 pairs/s eta 0.87 h
+step 1400/9375 loss 0.2766 83 pairs/s eta 0.86 h
+step 1500/9375 loss 0.1246 83 pairs/s eta 0.84 h
+step 1600/9375 loss 0.3507 83 pairs/s eta 0.83 h
+step 1700/9375 loss 0.1725 83 pairs/s eta 0.82 h
+step 1800/9375 loss 0.1105 83 pairs/s eta 0.81 h
+step 1900/9375 loss 0.2840 83 pairs/s eta 0.80 h
+step 2000/9375 loss 0.4664 83 pairs/s eta 0.79 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_2000
+step 2100/9375 loss 0.1561 83 pairs/s eta 0.78 h
+step 2200/9375 loss 0.2411 83 pairs/s eta 0.77 h
+step 2300/9375 loss 0.3631 83 pairs/s eta 0.76 h
+step 2400/9375 loss 0.2499 83 pairs/s eta 0.75 h
+step 2500/9375 loss 0.3301 83 pairs/s eta 0.74 h
+step 2600/9375 loss 0.3894 83 pairs/s eta 0.72 h
+step 2700/9375 loss 0.1417 83 pairs/s eta 0.71 h
+step 2800/9375 loss 0.7366 83 pairs/s eta 0.70 h
+step 2900/9375 loss 0.1584 83 pairs/s eta 0.69 h
+step 3000/9375 loss 0.1466 83 pairs/s eta 0.68 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_3000
+step 3100/9375 loss 0.2992 83 pairs/s eta 0.67 h
+step 3200/9375 loss 0.2269 83 pairs/s eta 0.66 h
+step 3300/9375 loss 0.2390 83 pairs/s eta 0.65 h
+step 3400/9375 loss 0.2115 83 pairs/s eta 0.64 h
+step 3500/9375 loss 0.1247 83 pairs/s eta 0.63 h
+step 3600/9375 loss 0.0570 83 pairs/s eta 0.62 h
+step 3700/9375 loss 0.2294 83 pairs/s eta 0.61 h
+step 3800/9375 loss 0.4486 83 pairs/s eta 0.59 h
+step 3900/9375 loss 0.3871 83 pairs/s eta 0.58 h
+step 4000/9375 loss 0.2531 83 pairs/s eta 0.57 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_4000
+step 4100/9375 loss 0.4667 83 pairs/s eta 0.56 h
+step 4200/9375 loss 0.1937 83 pairs/s eta 0.55 h
+step 4300/9375 loss 0.3553 83 pairs/s eta 0.54 h
+step 4400/9375 loss 0.0496 83 pairs/s eta 0.53 h
+step 4500/9375 loss 0.1748 83 pairs/s eta 0.52 h
+step 4600/9375 loss 0.0565 83 pairs/s eta 0.51 h
+step 4700/9375 loss 0.2957 83 pairs/s eta 0.50 h
+step 4800/9375 loss 0.2995 83 pairs/s eta 0.49 h
+step 4900/9375 loss 0.3819 83 pairs/s eta 0.48 h
+step 5000/9375 loss 0.1133 83 pairs/s eta 0.47 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_5000
+step 5100/9375 loss 0.2062 83 pairs/s eta 0.46 h
+step 5200/9375 loss 0.2880 83 pairs/s eta 0.45 h
+step 5300/9375 loss 0.1575 83 pairs/s eta 0.43 h
+step 5400/9375 loss 0.1896 83 pairs/s eta 0.42 h
+step 5500/9375 loss 0.2370 83 pairs/s eta 0.41 h
+step 5600/9375 loss 0.2651 83 pairs/s eta 0.40 h
+step 5700/9375 loss 0.2128 83 pairs/s eta 0.39 h
+step 5800/9375 loss 0.1539 83 pairs/s eta 0.38 h
+step 5900/9375 loss 0.1277 83 pairs/s eta 0.37 h
+step 6000/9375 loss 0.4733 83 pairs/s eta 0.36 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_6000
+step 6100/9375 loss 0.2665 83 pairs/s eta 0.35 h
+step 6200/9375 loss 0.3049 83 pairs/s eta 0.34 h
+step 6300/9375 loss 0.1686 83 pairs/s eta 0.33 h
+step 6400/9375 loss 0.2235 83 pairs/s eta 0.32 h
+step 6500/9375 loss 0.4597 83 pairs/s eta 0.31 h
+step 6600/9375 loss 0.1418 83 pairs/s eta 0.30 h
+step 6700/9375 loss 0.3097 83 pairs/s eta 0.28 h
+step 6800/9375 loss 0.0976 83 pairs/s eta 0.27 h
+step 6900/9375 loss 0.2154 83 pairs/s eta 0.26 h
+step 7000/9375 loss 0.2328 83 pairs/s eta 0.25 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_7000
+step 7100/9375 loss 0.1806 83 pairs/s eta 0.24 h
+step 7200/9375 loss 0.5734 83 pairs/s eta 0.23 h
+step 7300/9375 loss 0.2263 83 pairs/s eta 0.22 h
+step 7400/9375 loss 0.2797 83 pairs/s eta 0.21 h
+step 7500/9375 loss 0.2819 83 pairs/s eta 0.20 h
+step 7600/9375 loss 0.1487 83 pairs/s eta 0.19 h
+step 7700/9375 loss 0.1736 83 pairs/s eta 0.18 h
+step 7800/9375 loss 0.3753 84 pairs/s eta 0.17 h
+step 7900/9375 loss 0.4519 84 pairs/s eta 0.16 h
+step 8000/9375 loss 0.3349 84 pairs/s eta 0.15 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_8000
+step 8100/9375 loss 0.1986 83 pairs/s eta 0.14 h
+step 8200/9375 loss 0.0640 83 pairs/s eta 0.13 h
+step 8300/9375 loss 0.3525 83 pairs/s eta 0.11 h
+step 8400/9375 loss 0.1849 84 pairs/s eta 0.10 h
+step 8500/9375 loss 0.2093 84 pairs/s eta 0.09 h
+step 8600/9375 loss 0.1539 84 pairs/s eta 0.08 h
+step 8700/9375 loss 0.3362 84 pairs/s eta 0.07 h
+step 8800/9375 loss 0.2285 84 pairs/s eta 0.06 h
+step 8900/9375 loss 0.1763 84 pairs/s eta 0.05 h
+step 9000/9375 loss 0.1869 84 pairs/s eta 0.04 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_9000
+step 9100/9375 loss 0.0633 83 pairs/s eta 0.03 h
+step 9200/9375 loss 0.1523 83 pairs/s eta 0.02 h
+step 9300/9375 loss 0.2272 83 pairs/s eta 0.01 h
+checkpoint /Users/sriramelayaraja/.gemini/antigravity/scratch/amazon_ce/business-entity-resolution-2026/mac_ce/ce_model/ckpt_9375
+Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  4.82it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  4.82it/s]
+TRAINING DONE
