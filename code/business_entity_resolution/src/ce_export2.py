@@ -24,6 +24,8 @@ def main():
     ap.add_argument("--lo", type=float, default=0.02)
     ap.add_argument("--hi", type=float, default=0.98)
     ap.add_argument("--n-fr", type=int, default=150000)
+    ap.add_argument("--base-train", default="", help="training pairs to mix in (default: <v1>/ce_train.parquet)")
+    ap.add_argument("--n-base", type=int, default=0, help="subsample the mixed-in training pairs (0 = all)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     w0, w1, w2 = map(float, a.w.split(","))
@@ -43,7 +45,10 @@ def main():
     sel = np.r_[pos, neg]
     frdf = pd.DataFrame({"text_a": t1[b.i1.values[sel]], "text_b": t23[b.i2.values[sel]],
                          "label": np.r_[np.ones(len(pos)), np.zeros(len(neg))].astype(np.int8)})
-    tr = pd.concat([pd.read_parquet(f"{a.v1}/ce_train.parquet"), frdf], ignore_index=True)
+    base = pd.read_parquet(a.base_train or f"{a.v1}/ce_train.parquet")
+    if a.n_base and len(base) > a.n_base:
+        base = base.sample(a.n_base, random_state=1)
+    tr = pd.concat([base, frdf], ignore_index=True)
     tr = tr.sample(frac=1.0, random_state=0).reset_index(drop=True)
     tr.to_parquet(f"{a.out}/ce_train.parquet", compression="zstd")
     print(f"train {len(tr)} (France pseudo: {len(pos)} pos, {len(neg)} neg)", flush=True)
