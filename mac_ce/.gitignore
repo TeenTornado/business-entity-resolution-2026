@@ -1,3 +1,6 @@
 ce_model/
 ce_data/*.parquet
 ce_data/*.npy
+ce_model2/
+ce_data2/*.parquet
+ce_data2/*.npy

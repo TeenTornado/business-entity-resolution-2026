@@ -6,9 +6,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-DATA=$ROOT/mac_ce/ce_data
-MODEL=$ROOT/mac_ce/ce_model
-RES=$ROOT/mac_ce/results
+DATA=${DATA:-$ROOT/mac_ce/ce_data}
+MODEL=${MODEL:-$ROOT/mac_ce/ce_model}
+RES=${RES:-$ROOT/mac_ce/results}
 BASE=${BASE:-intfloat/multilingual-e5-base}
 MAXPAIRS=${MAXPAIRS:-300000}
 export PYTORCH_ENABLE_MPS_FALLBACK=1
