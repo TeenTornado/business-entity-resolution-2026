@@ -50,7 +50,14 @@ def cmd_train(a):
     os.makedirs(a.out, exist_ok=True)
     tok = AutoTokenizer.from_pretrained(a.base)
     model = AutoModelForSequenceClassification.from_pretrained(a.base, num_labels=1).to(dev)
-    opt = torch.optim.AdamW(model.parameters(), lr=a.lr, weight_decay=0.01)
+    if a.freeze_emb:
+        # the 250k-token multilingual vocabulary table dominates memory (and AdamW state);
+        # freezing it keeps fine-tuning in RAM on a laptop without hurting accuracy
+        for p in model.base_model.embeddings.word_embeddings.parameters():
+            p.requires_grad = False
+    train_params = [p for p in model.parameters() if p.requires_grad]
+    print(f"trainable params {sum(p.numel() for p in train_params) / 1e6:.0f}M", flush=True)
+    opt = torch.optim.AdamW(train_params, lr=a.lr, weight_decay=0.01)
     per_epoch = int(np.ceil(len(df) / a.bs))
     steps = a.epochs * per_epoch
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=steps, pct_start=0.06)
@@ -79,7 +86,7 @@ def cmd_train(a):
         sched.step()
         opt.zero_grad(set_to_none=True)
         done += 1
-        if (step + 1) % 100 == 0:
+        if (step + 1) % 100 == 0 or done == 20:
             el = time.time() - t0
             print(f"step {step + 1}/{steps} loss {loss.item():.4f} {done * a.bs / el:.0f} pairs/s "
                   f"eta {el / done * (steps - step - 1) / 3600:.2f} h", flush=True)
@@ -140,6 +147,7 @@ def main():
     ap.add_argument("--bs", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-5)
     ap.add_argument("--max-len", type=int, default=96)
+    ap.add_argument("--freeze-emb", type=int, default=1, help="freeze the word-embedding table (1/0)")
     ap.add_argument("--ckpt-every", type=int, default=2000)
     a = ap.parse_args()
     cmd_train(a) if a.cmd == "train" else cmd_score(a)

@@ -9,8 +9,8 @@ ROOT=$PWD
 DATA=$ROOT/mac_ce/ce_data
 MODEL=$ROOT/mac_ce/ce_model
 RES=$ROOT/mac_ce/results
-BASE=${BASE:-intfloat/multilingual-e5-large}
-MAXPAIRS=${MAXPAIRS:-600000}
+BASE=${BASE:-intfloat/multilingual-e5-base}
+MAXPAIRS=${MAXPAIRS:-300000}
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 export TOKENIZERS_PARALLELISM=false
 mkdir -p "$RES" "$MODEL"
@@ -41,7 +41,7 @@ python3 -c "from transformers import AutoTokenizer, AutoModelForSequenceClassifi
 echo "== 4. train (resumable; keep the lid open / mac awake)"; date
 if [ ! -f "$MODEL/final/config.json" ]; then
   caffeinate -dimsu python3 -u code/business_entity_resolution/src/ce.py train --data "$DATA" --out "$MODEL" \
-      --base "$BASE" --max-pairs "$MAXPAIRS" --epochs 1 --bs 16 --lr 2e-5 --max-len 96 --ckpt-every 2000 \
+      --base "$BASE" --max-pairs "$MAXPAIRS" --epochs 1 --bs 32 --lr 3e-5 --max-len 96 --ckpt-every 1000 \
       2>&1 | tee -a "$RES/train.log"
 fi
 
