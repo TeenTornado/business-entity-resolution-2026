@@ -128,3 +128,10 @@ differing by exactly 1 token on each side (not a typo: ratio < 60).
 - France region-vs-département check (same name + same house number pairs):
   - acceptance 95.6 % when the record ends in a département/city, 93.6 % when it ends in the
     region → **no penalty from département wording; hypothesis rejected**.
+- **CE blend (ce1)**: multilingual-e5-base cross-encoder (embeddings frozen, 300k hard pairs,
+  MacBook Pro 83 pairs/s, about 1 h) on c1-uncertain pairs (p in 0.05–0.95); logistic blend
+  fitted on val half A (weights: 0.72·logit(p2) + 0.35·logit(p_ce)), thr 0.7125:
+  - half A 0.98862 (c1 0.98777); **half B 0.98869 (c1 0.98769, +0.0010)**;
+  - TP +355, FP 471→398, FN 3961→3606;
+  - test: US +7.5k pairs, India +13.2k, France +7.8k (France: 9.6k removed, 17.4k added).
+  - File: probes/matching_results_ce1_blend.tsv.gz (validator PASS).
