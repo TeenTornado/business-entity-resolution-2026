@@ -135,3 +135,7 @@ differing by exactly 1 token on each side (not a typo: ratio < 60).
   - TP +355, FP 471→398, FN 3961→3606;
   - test: US +7.5k pairs, India +13.2k, France +7.8k (France: 9.6k removed, 17.4k added).
   - File: probes/matching_results_ce1_blend.tsv.gz (validator PASS).
+- **CE v2 blend (ce2)**: e5-base, 750k pairs (600k US/India + 150k French pseudo-labels), band 0.02–0.98:
+  half A 0.98890, **half B 0.98892** (ce1 0.98869, c1 0.98769); TP 251541, FP 456, FN 3345.
+  Test France: 13.0k removed / 20.6k added vs c1. File probes/matching_results_ce2_blend.tsv.gz (validator PASS).
+- ce1 public: **0.981916** (c1 0.978843; +0.0031 from +0.0010 val → France gain).
