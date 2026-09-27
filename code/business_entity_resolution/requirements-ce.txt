@@ -1,0 +1,4 @@
+# extra packages for the cross-encoder step (ce.py)
+torch>=2.3        # BSD
+transformers>=4.44  # Apache-2.0
+sentencepiece     # Apache-2.0

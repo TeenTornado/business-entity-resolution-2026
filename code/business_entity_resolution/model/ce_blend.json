@@ -1,0 +1,10 @@
+{
+ "cross_encoder": "intfloat/multilingual-e5-base (MIT), fine-tuned, word embeddings frozen",
+ "train_pairs": "600k hard US/India train pairs + 150k French pseudo-labelled test pairs, 1 epoch, bs 32, lr 3e-5, max_len 96",
+ "rescored_band": [0.02, 0.98],
+ "blend": {"intercept": 0.44869053, "w_logit_stage2": 0.71793365, "w_logit_ce": 0.36805993},
+ "threshold": 0.6875,
+ "one_owner": true,
+ "val_half_b_macro_f05": 0.98892,
+ "public_leaderboard": 0.983236
+}

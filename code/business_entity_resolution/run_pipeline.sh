@@ -34,8 +34,30 @@ python3 predict.py --work "$WORK" --model-dir "$WORK/stage1" --out "$WORK/stage1
 python3 collective.py train --work "$WORK" --model-dir "$WORK/stage1" --out-dir "$WORK/collective" \
     --n-train $NTRAIN --prune-thr $PRUNE
 python3 collective.py predict --work "$WORK" --out-dir "$WORK/collective" --test-feat "$WORK/test_pairfeat" \
-    --out "$OUT" --candidates "$WORK/stage1_out/candidate_pairs.tsv"
+    --out "$WORK/out_c1" --candidates "$WORK/stage1_out/candidate_pairs.tsv"
 
-# 7. validate the submission format
+# 7. cross-encoder inputs: val pair scores (reuse stage 2), hard train pairs, uncertain val/test pairs
+python3 collective.py train --work "$WORK" --model-dir "$WORK/stage1" --out-dir "$WORK/collective" \
+    --n-train $NTRAIN --prune-thr $PRUNE --reuse-stage2
+python3 ce_export.py --work "$WORK" --c1-dir "$WORK/collective" --test-feat "$WORK/test_pairfeat" \
+    --test-scores "$WORK/collective/test_scores_stage2.npy" --out "$WORK/ce1"
+
+# 8. cross-encoder round 1 (needs GPU/MPS), blend -> French pseudo-labels -> round 2
+python3 ce.py train --data "$WORK/ce1" --out "$WORK/ce1_model" --base intfloat/multilingual-e5-base --max-pairs 300000 --bs 32 --lr 3e-5
+python3 ce.py score --data "$WORK/ce1" --model "$WORK/ce1_model" --base intfloat/multilingual-e5-base
+python3 ce_blend.py --work "$WORK" --c1-dir "$WORK/collective" --ce-data "$WORK/ce1" --test-feat "$WORK/test_pairfeat" \
+    --test-scores "$WORK/collective/test_scores_stage2.npy" --out "$WORK/out_ce1" --candidates "$WORK/stage1_out/candidate_pairs.tsv" \
+    | tee "$WORK/ce1_blend.log"
+W1=$(grep "blend weights" "$WORK/ce1_blend.log" | tr -d '[]' | awk '{print $3","$4","$5}')
+python3 ce_export2.py --work "$WORK" --c1-dir "$WORK/collective" --v1 "$WORK/ce1" --w "$W1" --test-feat "$WORK/test_pairfeat" \
+    --test-scores "$WORK/collective/test_scores_stage2.npy" --out "$WORK/ce2"
+python3 ce.py train --data "$WORK/ce2" --out "$WORK/ce2_model" --base intfloat/multilingual-e5-base --bs 32 --lr 3e-5
+python3 ce.py score --data "$WORK/ce2" --model "$WORK/ce2_model" --base intfloat/multilingual-e5-base
+
+# 9. final blend -> output/matching_results.tsv (+ candidate_pairs.tsv from stage 1)
+python3 ce_blend.py --work "$WORK" --c1-dir "$WORK/collective" --ce-data "$WORK/ce2" --test-feat "$WORK/test_pairfeat" \
+    --test-scores "$WORK/collective/test_scores_stage2.npy" --out "$OUT" --candidates "$WORK/stage1_out/candidate_pairs.tsv"
+
+# 10. validate the submission format
 python3 "$(dirname "$DATA")/utils/validate_submission.py" \
     --matching "$OUT/matching_results.tsv" --candidate "$OUT/candidate_pairs.tsv" --test-dir "$DATA/test"

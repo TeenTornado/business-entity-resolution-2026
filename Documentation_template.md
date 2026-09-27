@@ -2,13 +2,13 @@
 
 **Team Name:** Local Aura Farmers
 **Team Members:** Sreeram Kumar V R (Team Leader), Krishna Mohan S, Sricharan N S
-**Submission Date:** 2026-09-26
+**Submission Date:** 2026-09-27
 
 ---
 
 ## 1. Executive Summary
 
-The pipeline has five stages:
+The pipeline has six stages:
 
 1. **Normalisation:** country-agnostic, with a script-to-Latin dictionary learned from the
    training ground truth.
@@ -21,13 +21,20 @@ The pipeline has five stages:
 5. **Stage 2, a collective matcher:** it re-scores each pair by comparing the candidate
    record with the S1 entity's other confident copies and with the copies of its strongest
    competing S1 entity.
+6. **Cross-encoder re-scoring:** a fine-tuned multilingual transformer
+   (`intfloat/multilingual-e5-base`, MIT licence, 278 M parameters) reads the raw text of
+   both records. It re-scores the pairs stage 2 is unsure about, and a logistic blend fitted
+   on validation combines the two scores. The model is adapted to the unseen French records
+   with pseudo-labels from our own confident test predictions.
 
 A tuned F0.5 threshold and a one-owner rule give the final lists.
 
 | | Validation macro F0.5 | Public leaderboard |
 |---|---|---|
 | Stage 1 only | 0.9844 | 0.9764 |
-| **Final (stage 1 + stage 2)** | **0.9877** | **0.9788** |
+| Stage 1 + stage 2 | 0.9877 | 0.9788 |
+| + cross-encoder (US/India training pairs) | 0.9887 | 0.9819 |
+| **Final: + cross-encoder with French pseudo-labels** | **0.9889** | **0.9832** |
 
 ---
 
@@ -181,8 +188,9 @@ name/address cosines, vocabulary skew and sibling indicators. Pairs with q ≥ 0
   - the empty-address flag, and whether the candidate is itself an anchor
 
 **Model type:** LightGBM binary classifiers (MIT licence): pruner, stage-1 fold models and
-the stage-2 model. Each has up to a few thousand trees × 127 leaves, far below the 8 B
-parameter limit. No pretrained language model is used.
+the stage-2 model. Each has up to a few thousand trees × 127 leaves.
+The only pretrained model is the cross-encoder below (278 M parameters, MIT licence), far
+below the 8 B parameter limit.
 
 - **Training data:** candidates of 800,000 training S1 entities (about 5 M pairs after
   pruning).
@@ -208,6 +216,28 @@ Tried and not adopted:
     distractors, so these features carry real signal.
 - **A looser France threshold:** −0.0006 public.
 
+**Cross-encoder (stage 3):**
+- **Model:** `intfloat/multilingual-e5-base` (MIT) with a single-logit classification head,
+  fine-tuned as a cross-encoder on `name | address | country` of both records. The
+  250 k-token word-embedding table is frozen (86 M trainable parameters), which keeps
+  training in laptop memory. It trained on an Apple-silicon MacBook Pro (MPS) at about
+  85 pairs/s.
+- **Training data (final version, 750 k pairs, 1 epoch):**
+  - 600 k hard US/India training pairs (out-of-fold stage-1 score in 0.01–0.99, plus 5 %
+    easy pairs);
+  - 150 k French test pairs **pseudo-labelled** from the previous blend's confident
+    decisions (p ≥ 0.98 as matches, 0.001 ≤ p ≤ 0.02 as hard non-matches). No test labels
+    are used.
+- **What it scores:** only pairs whose stage-2 probability is in 0.02–0.98 (1.37 M test
+  pairs, 65 k validation pairs). Every other pair keeps its stage-2 score.
+- **Blend:** logistic regression on validation half A,
+  `logit(p) = 0.449 + 0.718·logit(p_stage2) + 0.368·logit(p_ce)`. The threshold is re-tuned
+  on half A (**t = 0.6875**), then the one-owner rule is applied; half B is reported.
+- **Why it helps:** it reads raw multilingual text. Pretraining covers French words, accents
+  and address conventions, which the hand-built features only learned from US/India data.
+  The public gain (+0.0044 over two versions) is several times the validation gain
+  (+0.0012), because validation contains no French records.
+
 ---
 
 ## 5. Results & Error Analysis
@@ -222,12 +252,18 @@ Validation protocol:
 | v2: pairwise + graph-context + frequency features | 0.9782 | 0.955 |
 | v4: + address channel, learned pruner, sibling features | 0.9843 | 0.9758 |
 | v6: + sibling simulation, name graph, test self-training | 0.9844 | 0.9764 |
-| **Final: + stage-2 collective matcher, orphan-free training** | **0.9877** | **0.9788** |
+| c1: + stage-2 collective matcher, orphan-free training | 0.9877 | 0.9788 |
+| ce1: + e5-base cross-encoder blend (300 k US/India pairs) | 0.9887 | 0.9819 |
+| **ce2 (final): cross-encoder + 150 k French pseudo-labels, wider band** | **0.9889** | **0.9832** |
 
-- **F_0.5 Score (macro):** **0.9877** on held-out training entities (half B); **0.9788** on the public leaderboard.
-- Final validation breakdown:
-  - pair precision 0.9981, pair recall 0.9672
-  - loss from missed matches 0.0105; loss from false matches 0.0019
+- **F_0.5 Score (macro):** **0.98892** on held-out training entities (half B); **0.983236** on the public leaderboard.
+- Final validation (half B), against c1:
+
+  | | c1 | Final |
+  |---|---|---|
+  | True matches found | 250,925 | 251,541 |
+  | False matches | 471 | 456 |
+  | Missed matches | 3,961 | 3,345 |
 - **Stage 2 compared with stage 1 on the same folds:**
 
   | | Stage 1 | Stage 2 |
@@ -255,14 +291,15 @@ Validation protocol:
 
 ## 6. Conclusion
 
-The largest single gain came from treating matching as a *group* problem. An S1 entity's
+Two ideas carried most of the gains. The first was treating matching as a *group* problem. An S1 entity's
 copies resemble one another, so a hard copy is best judged against the copies already
 matched with confidence, and against the copies of its rival entities. Two other steps
 mattered: training on a universe where every record's owner is present, and simulating the
 test set's distractor patterns in training. Together they took the pipeline from 0.9764 to
-0.9788 on the public leaderboard, with a validation score of 0.9877. It uses no external
-data or large model. It handles the unseen France records through language-agnostic
-normalisation and group features.
+0.9788 on the public leaderboard. The second was a multilingual cross-encoder that re-reads
+the raw text of uncertain pairs. It was adapted to France through pseudo-labels from our
+own confident predictions, and took the public score to **0.9832** (validation 0.9889). It
+uses no external data; the only pretrained model is a 278 M-parameter MIT-licensed encoder.
 
 ---
 
@@ -292,6 +329,9 @@ bash code/business_entity_resolution/run_pipeline.sh <student_resource/dataset> 
 | `scoring.py` | graph-context, frequency, vocabulary, sibling and name-graph features; decision rule; macro F0.5 |
 | `train.py` / `predict.py` | pruner + stage-1 training/tuning; per-country test candidate stage and scoring |
 | `collective.py` | stage-2 collective matcher (out-of-fold stage 1, group features, final decision, writer) |
+| `ce_export.py`, `ce_export2.py` | text pairs for the cross-encoder (hard train pairs, French pseudo-labels, uncertain val/test pairs) |
+| `ce.py` | cross-encoder fine-tuning and scoring (PyTorch, Apple MPS / CUDA / CPU; resumable) |
+| `ce_blend.py` | validation-fitted blend of stage-2 and cross-encoder scores, final decision, writer |
 
 ### B. Additional Results
 
@@ -299,12 +339,12 @@ Test-set predictions (final submission):
 
 | Country | S1 entities | Candidate pairs | Candidates / S1 | Predicted matches | Matches / S1 |
 |---|---|---|---|---|---|
-| US | 663,106 | 3,735,756 | 5.63 | 2,230,710 | 3.36 |
-| India | 809,986 | 5,328,740 | 6.58 | 2,697,142 | 3.33 |
-| France (unseen in training) | 259,452 | 2,201,955 | 8.49 | 825,213 | 3.18 |
-| **Total** | **1,732,544** | **11,266,451** | **6.50** | **5,753,065** | **3.32** |
+| US | 663,106 | 3,735,756 | 5.63 | 2,241,123 | 3.38 |
+| India | 809,986 | 5,328,740 | 6.58 | 2,714,698 | 3.35 |
+| France (unseen in training) | 259,452 | 2,201,955 | 8.49 | 832,730 | 3.21 |
+| **Total** | **1,732,544** | **11,266,451** | **6.50** | **5,788,551** | **3.34** |
 
-- 94.0 % of test S1 entities receive at least one match (train: 94.4 % are non-singletons).
+- 94.1 % of test S1 entities receive at least one match (train: 94.4 % are non-singletons).
 - Both files pass `utils/validate_submission.py`.
 
 Top stage-2 features by gain:
